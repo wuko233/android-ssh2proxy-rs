@@ -1,0 +1,11 @@
+package com.wuko233.ssh2proxy
+
+object NativeBridge {
+    init {
+        System.loadLibrary("ssh2proxy")
+    }
+    external fun connect(configJson: String): Int
+    external fun setTunFd(fd: Int)
+    external fun disconnect()
+    external fun getStats(): String
+}
