@@ -1,0 +1,15 @@
+[package]
+name = "ssh2proxy-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true }
+russh = { workspace = true }
+smoltcp = { workspace = true }
+tun = { workspace = true }
+fast-socks5 = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }

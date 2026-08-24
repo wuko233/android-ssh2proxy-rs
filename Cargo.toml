@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+members = ["core"]
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
+russh = "0.63"
+smoltcp = { version = "0.14", default-features = false, features = [
+    "std", "medium-ip", "proto-ipv4", "socket-tcp", "socket-udp", "async",
+] }
+tun = { version = "0.8", features = ["async"] }
+fast-socks5 = "1.0"
+jni = "0.21"
+anyhow = "1"
+thiserror = "2"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
