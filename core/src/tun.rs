@@ -73,7 +73,7 @@ impl<R: Write> smoltcp::phy::TxToken for TxToken<'_, R> {
     {
         let mut buf = [0u8; 65536];
         let r = f(&mut buf[..len]);
-        let _ = self.dev.write(&buf[..len]);
+        let _ = self.dev.write_all(&buf[..len]);
         r
     }
 }
