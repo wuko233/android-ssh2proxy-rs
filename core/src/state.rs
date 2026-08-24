@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Auth {
-    Password(String),
+    Password { password: String },
     PrivateKey { key: String, passphrase: Option<String> },
 }
 
@@ -28,7 +28,7 @@ impl Default for ProxyConfig {
             host: String::new(),
             port: 22,
             username: "root".into(),
-            auth: Auth::Password(String::new()),
+            auth: Auth::Password { password: String::new() },
             keepalive_interval: Some(Duration::from_secs(15)),
             keepalive_max: 3,
             inactivity_timeout: Some(Duration::from_secs(30)),
@@ -69,5 +69,20 @@ mod tests {
     fn state_initial_is_disconnected() {
         let s = ProxyState::Disconnected;
         assert_eq!(s, ProxyState::Disconnected);
+    }
+
+    #[test]
+    fn auth_serde_roundtrip() {
+        let pw = Auth::Password { password: "secret".into() };
+        let json = serde_json::to_string(&pw).unwrap();
+        assert!(json.contains("\"type\":\"password\""));
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, Auth::Password { password } if password == "secret"));
+
+        let key = Auth::PrivateKey { key: "k".into(), passphrase: Some("p".into()) };
+        let json = serde_json::to_string(&key).unwrap();
+        assert!(json.contains("\"type\":\"private_key\""));
+        let back: Auth = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, Auth::PrivateKey { key, passphrase: Some(p) } if key == "k" && p == "p"));
     }
 }
