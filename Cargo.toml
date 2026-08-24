@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["core"]
+members = ["core", "android"]
 
 [workspace.dependencies]
 tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
