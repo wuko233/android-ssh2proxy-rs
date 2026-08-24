@@ -56,6 +56,7 @@ class MainActivity : ComponentActivity() {
                 Button(onClick = {
                     if (connected) {
                         NativeBridge.disconnect()
+                        stopService(Intent(this@MainActivity, SshVpnService::class.java))
                         connected = false
                     } else {
                         val intent = VpnService.prepare(this@MainActivity)
