@@ -4,14 +4,28 @@ use std::sync::OnceLock;
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jstring};
 use jni::JNIEnv;
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 
 use ssh2proxy_core::{Proxy, ProxyConfig};
 
 static PROXY: OnceLock<tokio::sync::Mutex<Option<Proxy>>> = OnceLock::new();
+static RT: OnceLock<Runtime> = OnceLock::new();
 
 fn proxy_mutex() -> &'static tokio::sync::Mutex<Option<Proxy>> {
     PROXY.get_or_init(|| tokio::sync::Mutex::new(None))
+}
+
+fn runtime() -> Option<&'static Runtime> {
+    RT.get().or_else(|| {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .ok()?;
+        let _ = RT.set(rt);
+        RT.get()
+    })
 }
 
 #[no_mangle]
@@ -30,16 +44,20 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
         Ok(c) => c,
         Err(_) => return -1,
     };
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+    let rt = match runtime() {
+        Some(rt) => rt,
+        None => return -2,
+    };
     let (tx, _rx) = mpsc::unbounded_channel();
     let mut proxy = Proxy::new(config, tx);
-    let code = match rt.block_on(proxy.connect()) {
-        Ok(()) => 0,
+    match rt.block_on(proxy.connect()) {
+        Ok(()) => {
+            let mut slot = proxy_mutex().blocking_lock();
+            *slot = Some(proxy);
+            0
+        }
         Err(_) => -2,
-    };
-    let mut slot = proxy_mutex().blocking_lock();
-    *slot = Some(proxy);
-    code
+    }
 }
 
 #[no_mangle]
@@ -59,9 +77,12 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_disconnect(
     _env: JNIEnv,
     _class: JClass,
 ) {
+    let rt = match runtime() {
+        Some(rt) => rt,
+        None => return,
+    };
     let mut slot = proxy_mutex().blocking_lock();
     if let Some(mut proxy) = slot.take() {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(proxy.disconnect());
     }
 }
@@ -71,5 +92,8 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_getStats(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    env.new_string("{}").unwrap_or_default().into_raw()
+    match env.new_string("{}") {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
+    }
 }

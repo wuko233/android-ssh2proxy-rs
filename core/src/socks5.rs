@@ -23,7 +23,13 @@ where
 
 pub fn start_socks5_server(ssh: Arc<SshClient>, bind: SocketAddr) -> JoinHandle<()> {
     tokio::spawn(async move {
-        let listener = TcpListener::bind(bind).await.unwrap();
+        let listener = match TcpListener::bind(bind).await {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("failed to bind SOCKS5 listener on {bind}: {e}");
+                return;
+            }
+        };
         loop {
             let Ok((socket, _)) = listener.accept().await else { continue };
             let ssh = ssh.clone();

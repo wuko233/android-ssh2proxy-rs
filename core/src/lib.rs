@@ -35,7 +35,13 @@ impl Proxy {
 
     pub async fn connect(&mut self) -> Result<()> {
         self.set_state(ProxyState::Connecting);
-        let ssh = Arc::new(SshClient::connect(&self.config).await?);
+        let ssh = match SshClient::connect(&self.config).await {
+            Ok(ssh) => Arc::new(ssh),
+            Err(e) => {
+                self.set_state(ProxyState::Error);
+                return Err(e);
+            }
+        };
         let handle = start_socks5_server(ssh.clone(), "127.0.0.1:1080".parse()?);
         self.ssh = Some(ssh);
         self.socks_handle = Some(handle);

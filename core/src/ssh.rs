@@ -18,9 +18,14 @@ impl client::Handler for Handler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKeyOrCertificate,
+        server_public_key: &PublicKeyOrCertificate,
     ) -> Result<bool, Self::Error> {
-        // TOFU：v1 默认接受，指纹展示在 UI 层（P3）。
+        // TOFU：v1 默认接受，指纹展示在 UI 层（P3）；此处至少记录指纹。
+        let key = server_public_key.public_key();
+        log::info!(
+            "server host key fingerprint (SHA256): {}",
+            key.fingerprint(russh::keys::HashAlg::Sha256)
+        );
         Ok(true)
     }
 }

@@ -1915,9 +1915,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smoltcp",
- "thiserror 2.0.20",
  "tokio",
- "tun",
 ]
 
 [[package]]
