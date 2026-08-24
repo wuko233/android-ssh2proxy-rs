@@ -1,3 +1,4 @@
+pub mod dns;
 pub mod socks5;
 pub mod ssh;
 pub mod state;
