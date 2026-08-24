@@ -37,7 +37,10 @@ impl<R: std::io::Read + std::io::Write> Tun2Socks<R> {
         let config = Config::new(smoltcp::wire::HardwareAddress::Ip);
         let mut iface = Interface::new(config, &mut device, Instant::ZERO);
         iface.update_ip_addrs(|addrs| {
-            let _ = addrs.push(IpCidr::Ipv4(Ipv4Cidr::new(cfg.address, 24)));
+            let _ = addrs.push(IpCidr::Ipv4(Ipv4Cidr::new(
+                cfg.address,
+                cfg.netmask.prefix_len(),
+            )));
         });
         iface
             .routes_mut()
