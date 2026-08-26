@@ -2,12 +2,33 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use anyhow::Context;
+use fast_socks5::client;
 use fast_socks5::server::{transfer, Socks5ServerProtocol};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 use crate::ssh::SshClient;
+
+pub struct Socks5Dialer {
+    pub addr: SocketAddr,
+}
+
+impl Socks5Dialer {
+    pub async fn connect(
+        &self,
+        host: &str,
+        port: u16,
+    ) -> anyhow::Result<fast_socks5::client::Socks5Stream<tokio::net::TcpStream>> {
+        Ok(client::Socks5Stream::connect(
+            self.addr,
+            host.to_string(),
+            port,
+            client::Config::default(),
+        )
+        .await?)
+    }
+}
 
 pub async fn splice<A, B>(a: &mut A, b: &mut B)
 where

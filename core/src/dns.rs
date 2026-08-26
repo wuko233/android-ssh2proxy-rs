@@ -1,7 +1,4 @@
-use anyhow::Context;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-use crate::ssh::SshClient;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 fn frame(msg: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(msg.len() + 2);
@@ -10,6 +7,7 @@ fn frame(msg: &[u8]) -> Vec<u8> {
     out
 }
 
+#[allow(dead_code)]
 fn unframe(buf: &[u8]) -> anyhow::Result<(Vec<u8>, &[u8])> {
     if buf.len() < 2 {
         anyhow::bail!("short dns tcp frame");
@@ -21,21 +19,24 @@ fn unframe(buf: &[u8]) -> anyhow::Result<(Vec<u8>, &[u8])> {
     Ok((buf[2..2 + len].to_vec(), &buf[2 + len..]))
 }
 
-pub async fn resolve_over_tcpip(
-    ssh: &SshClient,
+pub async fn resolve<F, Fut, S>(
+    connect: F,
     dns_server: &str,
     query: &[u8],
-) -> anyhow::Result<Vec<u8>> {
-    let mut stream = ssh
-        .open_tcpip(dns_server, 53)
-        .await
-        .context("open dns tcpip")?
-        .into_stream();
+) -> anyhow::Result<Vec<u8>>
+where
+    F: FnOnce(String, u16) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<S>>,
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let mut stream = connect(dns_server.to_string(), 53).await?;
     stream.write_all(&frame(query)).await?;
-    let mut buf = Vec::new();
-    stream.read_to_end(&mut buf).await?;
-    let (payload, _) = unframe(&buf)?;
-    Ok(payload)
+    let mut len_buf = [0u8; 2];
+    stream.read_exact(&mut len_buf).await?;
+    let len = u16::from_be_bytes(len_buf) as usize;
+    let mut body = vec![0u8; len];
+    stream.read_exact(&mut body).await?;
+    Ok(body)
 }
 
 #[cfg(test)]
@@ -51,5 +52,18 @@ mod tests {
         let (payload, rest) = unframe(&framed).unwrap();
         assert_eq!(payload, q);
         assert!(rest.is_empty());
+    }
+
+    #[test]
+    fn unframe_rejects_truncated() {
+        assert!(unframe(&[0, 10, 1, 2]).is_err());
+    }
+
+    #[test]
+    fn unframe_returns_rest() {
+        let buf = vec![0, 2, 9, 9, 0, 3, 1, 2, 3];
+        let (payload, rest) = unframe(&buf).unwrap();
+        assert_eq!(payload, vec![9, 9]);
+        assert_eq!(rest, vec![0, 3, 1, 2, 3]);
     }
 }
