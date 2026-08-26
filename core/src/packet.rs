@@ -148,6 +148,7 @@ fn build_ipv4_header(total_len: usize, protocol: u8, src: [u8; 4], dst: [u8; 4])
     h
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_tcp_packet(
     iph: &Ipv4Header,
     src_port: u16,
