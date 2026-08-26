@@ -125,6 +125,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
     }
 
     async fn apply(&mut self, key: FlowKey, actions: Vec<FlowAction>) {
+        let mut done = false;
         for a in actions {
             match a {
                 FlowAction::SendToClient(pkt) => { let _ = self.tun.write_all(&pkt).await; }
@@ -134,10 +135,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
                 FlowAction::CloseUpstream => {
                     if let Some(h) = self.flows.get(&key) { let _ = h.c2r_tx.send(vec![]); }
                 }
-                FlowAction::Done => {}
+                FlowAction::Done => { done = true; }
             }
         }
-        self.flows.retain(|_, h| h.flow.state != FlowState::Closed);
+        if done {
+            self.flows.remove(&key);
+        } else {
+            self.flows.retain(|_, h| h.flow.state != FlowState::Closed);
+        }
     }
 }
 
