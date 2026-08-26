@@ -1,5 +1,6 @@
 pub mod dns;
 pub mod packet;
+pub mod tcpflow;
 pub mod socks5;
 pub mod ssh;
 pub mod state;
