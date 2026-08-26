@@ -46,9 +46,9 @@ impl Flow {
             state: FlowState::SynReceived,
             client_isn,
             our_isn,
-            our_seq: our_isn,
+            our_seq: our_isn.wrapping_add(1),
             our_acked: our_isn,
-            next_client_seq: client_isn + 1,
+            next_client_seq: client_isn.wrapping_add(1),
             window: 65535,
         }
     }
@@ -78,18 +78,24 @@ impl Flow {
             FlowState::Established => {
                 self.window = seg.window;
                 self.our_acked = self.our_acked.max(seg.ack);
-                if seg.flags.fin {
-                    self.state = FlowState::Closing;
-                    self.next_client_seq = seg.seq.wrapping_add(1);
-                    out.push(FlowAction::SendToClient(self.ack_only()));
-                    out.push(FlowAction::CloseUpstream);
-                } else if !seg.payload.is_empty() {
-                    let seq = seg.seq;
+                let mut should_ack = false;
+                if !seg.payload.is_empty() {
+                    should_ack = true;
                     // 重传幂等：只转发新数据
-                    if seq == self.next_client_seq {
-                        self.next_client_seq = seq.wrapping_add(seg.payload.len() as u32);
+                    if seg.seq == self.next_client_seq {
+                        self.next_client_seq = self.next_client_seq.wrapping_add(seg.payload.len() as u32);
                         out.push(FlowAction::SendUpstream(seg.payload.to_vec()));
                     }
+                }
+                if seg.flags.fin {
+                    should_ack = true;
+                    // FIN 消耗 1 个序号
+                    self.next_client_seq = self.next_client_seq.wrapping_add(1);
+                    self.state = FlowState::Closing;
+                    out.push(FlowAction::SendToClient(self.take_fin()));
+                    out.push(FlowAction::CloseUpstream);
+                }
+                if should_ack {
                     out.push(FlowAction::SendToClient(self.ack_only()));
                 }
             }
@@ -109,11 +115,13 @@ impl Flow {
     }
 
     pub fn handle_upstream_eof(&mut self) -> Vec<FlowAction> {
-        if self.state != FlowState::Established {
-            return vec![FlowAction::Done];
+        match self.state {
+            FlowState::Established => {
+                self.state = FlowState::Closing;
+                vec![FlowAction::SendToClient(self.take_fin()), FlowAction::Done]
+            }
+            _ => vec![FlowAction::Done],
         }
-        self.state = FlowState::Closing;
-        vec![FlowAction::SendToClient(self.fin_packet()), FlowAction::Done]
     }
 
     fn iph(&self) -> crate::packet::Ipv4Header {
@@ -180,6 +188,12 @@ impl Flow {
             &[],
         )
     }
+
+    fn take_fin(&mut self) -> Vec<u8> {
+        let pkt = self.fin_packet();
+        self.our_seq = self.our_seq.wrapping_add(1);
+        pkt
+    }
 }
 
 #[cfg(test)]
@@ -229,6 +243,45 @@ mod tests {
         assert!(a.iter().any(|x| matches!(x, FlowAction::SendToClient(_))));
         let e = flow.handle_upstream_eof();
         assert!(e.iter().any(|x| matches!(x, FlowAction::SendToClient(_))));
+        assert_eq!(flow.state, FlowState::Closing);
+    }
+
+    #[test]
+    fn upstream_data_uses_seq_after_syn_and_reversed_addr() {
+        let key = FlowKey { src_ip: [10,0,0,2], src_port: 40000, dst_ip: [1,2,3,4], dst_port: 443 };
+        let mut flow = Flow::new(key, 1000, 5000);
+        flow.handle_packet(&seg(1000, 0, TcpFlags { syn: true, ..Default::default() }, &[]));
+        flow.handle_packet(&seg(1001, 5001, TcpFlags { ack: true, ..Default::default() }, &[]));
+        let actions = flow.handle_upstream(b"X".to_vec());
+        let pkt = match &actions[0] {
+            FlowAction::SendToClient(p) => p,
+            _ => panic!("expected SendToClient"),
+        };
+        let (iph, rest) = crate::packet::parse_ipv4(pkt).unwrap();
+        assert_eq!(iph.src, [1, 2, 3, 4]);
+        assert_eq!(iph.dst, [10, 0, 0, 2]);
+        let tcp = crate::packet::parse_tcp(rest).unwrap();
+        assert_eq!(tcp.seq, 5001);
+        assert_eq!(tcp.ack, 1001);
+    }
+
+    #[test]
+    fn client_fin_triggers_our_fin() {
+        let key = FlowKey { src_ip: [10,0,0,2], src_port: 40000, dst_ip: [1,2,3,4], dst_port: 443 };
+        let mut flow = Flow::new(key, 1000, 5000);
+        flow.handle_packet(&seg(1000, 0, TcpFlags { syn: true, ..Default::default() }, &[]));
+        flow.handle_packet(&seg(1001, 5001, TcpFlags { ack: true, ..Default::default() }, &[]));
+        let actions = flow.handle_packet(&seg(1001, 5001, TcpFlags { ack: true, fin: true, ..Default::default() }, &[]));
+        let fins = actions.iter().filter(|a| {
+            if let FlowAction::SendToClient(p) = a {
+                let (_, rest) = crate::packet::parse_ipv4(p).unwrap();
+                crate::packet::parse_tcp(rest).unwrap().flags.fin
+            } else {
+                false
+            }
+        }).count();
+        assert_eq!(fins, 1);
+        assert!(actions.iter().any(|a| matches!(a, FlowAction::CloseUpstream)));
         assert_eq!(flow.state, FlowState::Closing);
     }
 }
