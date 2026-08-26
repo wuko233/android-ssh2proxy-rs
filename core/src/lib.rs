@@ -4,6 +4,7 @@ pub mod tcpflow;
 pub mod socks5;
 pub mod ssh;
 pub mod state;
+pub mod dataplane;
 pub use state::{Auth, ProxyConfig, ProxyState, StateEvent};
 
 use std::sync::Arc;

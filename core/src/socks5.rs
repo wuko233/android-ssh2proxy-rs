@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::ssh::SshClient;
 
+#[derive(Clone)]
 pub struct Socks5Dialer {
     pub addr: SocketAddr,
 }
