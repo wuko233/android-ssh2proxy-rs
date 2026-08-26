@@ -234,4 +234,41 @@ mod tests {
         assert_eq!(seg.dst_port, 443);
         assert_eq!(seg.seq, 100);
     }
+
+    #[test]
+    fn internet_checksum_odd_length() {
+        assert_eq!(internet_checksum(&[0x01]), 0xFEFF);
+    }
+
+    fn tcp_checksum_of(pkt: &[u8], iph: &Ipv4Header) -> u16 {
+        let seg = &pkt[20..];
+        let mut data = Vec::with_capacity(12 + seg.len());
+        data.extend_from_slice(&iph.src);
+        data.extend_from_slice(&iph.dst);
+        data.push(0);
+        data.push(iph.protocol);
+        data.extend_from_slice(&(seg.len() as u16).to_be_bytes());
+        data.extend_from_slice(seg);
+        data[28] = 0;
+        data[29] = 0;
+        internet_checksum(&data)
+    }
+
+    #[test]
+    fn tcp_checksum_is_valid() {
+        let iph = Ipv4Header { src: [10, 0, 0, 2], dst: [1, 2, 3, 4], protocol: 6, total_len: 0 };
+        let payload = b"GET / HTTP/1.1\r\n";
+        let pkt = build_tcp_packet(&iph, 40000, 443, 5000, 1001, TcpFlags { ack: true, psh: true, ..Default::default() }, 65535, payload);
+        let embedded = u16::from_be_bytes([pkt[36], pkt[37]]);
+        assert_eq!(embedded, tcp_checksum_of(&pkt, &iph));
+        assert_ne!(embedded, 0);
+    }
+
+    #[test]
+    fn udp_checksum_is_valid() {
+        let iph = Ipv4Header { src: [10, 0, 0, 1], dst: [10, 0, 0, 2], protocol: 17, total_len: 0 };
+        let pkt = build_udp_packet(&iph, 53, 40000, &[1, 2, 3, 4]);
+        let embedded = u16::from_be_bytes([pkt[26], pkt[27]]);
+        assert_ne!(embedded, 0);
+    }
 }
