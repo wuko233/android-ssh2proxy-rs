@@ -69,7 +69,7 @@ impl Proxy {
     }
 
     pub async fn disconnect(&mut self) {
-        self.stop.notify_waiters();
+        self.stop.notify_one();
         self.teardown().await;
         self.set_state(ProxyState::Disconnected);
     }
@@ -86,7 +86,7 @@ impl Proxy {
 
     /// Blocking reconnect loop: monitors the live session and, once it drops,
     /// re-establishes it with `backoff_delay` between attempts. Returns when an
-    /// explicit `disconnect()` (or `stop_handle().notify_waiters()`) is issued.
+    /// explicit `disconnect()` (or `stop_handle().notify_one()`) is issued.
     pub async fn run_reconnect_loop(&mut self) -> Result<()> {
         loop {
             if self.ssh.is_none() && !self.reconnect_with_backoff().await {
