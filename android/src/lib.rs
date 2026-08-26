@@ -1,21 +1,17 @@
 use std::os::fd::RawFd;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jstring};
 use jni::JNIEnv;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 use ssh2proxy_core::{Proxy, ProxyConfig};
 
-static PROXY: OnceLock<tokio::sync::Mutex<Option<Proxy>>> = OnceLock::new();
 static RT: OnceLock<Runtime> = OnceLock::new();
+static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
-
-fn proxy_mutex() -> &'static tokio::sync::Mutex<Option<Proxy>> {
-    PROXY.get_or_init(|| tokio::sync::Mutex::new(None))
-}
 
 fn runtime() -> Option<&'static Runtime> {
     RT.get().or_else(|| {
@@ -57,8 +53,10 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
     let mut proxy = Proxy::new(config, tx);
     match rt.block_on(proxy.connect()) {
         Ok(()) => {
-            let mut slot = proxy_mutex().blocking_lock();
-            *slot = Some(proxy);
+            let stop = proxy.stop_handle();
+            rt.spawn(async move { let _ = proxy.run_reconnect_loop().await; });
+            let mut slot = STOP.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = Some(stop);
             0
         }
         Err(_) => -2,
@@ -106,13 +104,9 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_disconnect(
     _env: JNIEnv,
     _class: JClass,
 ) {
-    let rt = match runtime() {
-        Some(rt) => rt,
-        None => return,
-    };
-    let mut slot = proxy_mutex().blocking_lock();
-    if let Some(mut proxy) = slot.take() {
-        rt.block_on(proxy.disconnect());
+    let stop = STOP.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(stop) = stop {
+        stop.notify_one();
     }
 }
 
