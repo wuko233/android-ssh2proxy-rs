@@ -124,6 +124,11 @@ impl Flow {
         }
     }
 
+    pub fn handle_connect_failed(&mut self) -> Vec<FlowAction> {
+        self.state = FlowState::Closed;
+        vec![FlowAction::SendToClient(self.rst_packet()), FlowAction::Done]
+    }
+
     fn iph(&self) -> crate::packet::Ipv4Header {
         crate::packet::Ipv4Header {
             src: self.key.dst_ip,
@@ -184,6 +189,20 @@ impl Flow {
             self.our_seq,
             self.next_client_seq,
             TcpFlags { ack: true, fin: true, ..Default::default() },
+            self.window,
+            &[],
+        )
+    }
+
+    fn rst_packet(&self) -> Vec<u8> {
+        let iph = self.iph();
+        crate::packet::build_tcp_packet(
+            &iph,
+            self.key.dst_port,
+            self.key.src_port,
+            self.our_seq,
+            self.next_client_seq,
+            TcpFlags { rst: true, ack: true, ..Default::default() },
             self.window,
             &[],
         )
@@ -283,5 +302,24 @@ mod tests {
         assert_eq!(fins, 1);
         assert!(actions.iter().any(|a| matches!(a, FlowAction::CloseUpstream)));
         assert_eq!(flow.state, FlowState::Closing);
+    }
+
+    #[test]
+    fn connect_failed_emits_rst_and_done() {
+        let key = FlowKey { src_ip: [10,0,0,2], src_port: 40000, dst_ip: [1,2,3,4], dst_port: 443 };
+        let mut flow = Flow::new(key, 1000, 5000);
+        let actions = flow.handle_connect_failed();
+        assert!(actions.iter().any(|a| matches!(a, FlowAction::Done)));
+        let rst = actions.iter().find(|a| matches!(a, FlowAction::SendToClient(_))).expect("expected RST SendToClient");
+        if let FlowAction::SendToClient(p) = rst {
+            let (_, rest) = crate::packet::parse_ipv4(p).unwrap();
+            let tcp = crate::packet::parse_tcp(rest).unwrap();
+            assert!(tcp.flags.rst && tcp.flags.ack);
+            assert_eq!(tcp.seq, 5001);
+            assert_eq!(tcp.ack, 1001);
+        } else {
+            panic!("expected SendToClient");
+        }
+        assert_eq!(flow.state, FlowState::Closed);
     }
 }
