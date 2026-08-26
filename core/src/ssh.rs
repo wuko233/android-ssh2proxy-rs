@@ -89,6 +89,15 @@ impl SshClient {
             .disconnect(russh::Disconnect::ByApplication, "client disconnect", "")
             .await;
     }
+
+    /// Returns true once the underlying SSH session has terminated.
+    ///
+    /// `Handle::is_closed` reflects `tokio::sync::mpsc::Sender::is_closed`, which
+    /// flips to true when the connection's background task finishes and drops its
+    /// receiver — i.e. exactly when the session disconnects (cleanly or by error).
+    pub async fn is_closed(&self) -> bool {
+        self.handle.lock().await.is_closed()
+    }
 }
 
 #[cfg(test)]
