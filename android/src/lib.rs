@@ -1,5 +1,5 @@
 use std::os::fd::RawFd;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use jni::objects::{JClass, JString};
 use jni::sys::{jint, jstring};
@@ -11,6 +11,7 @@ use ssh2proxy_core::{Proxy, ProxyConfig};
 
 static PROXY: OnceLock<tokio::sync::Mutex<Option<Proxy>>> = OnceLock::new();
 static RT: OnceLock<Runtime> = OnceLock::new();
+static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
 
 fn proxy_mutex() -> &'static tokio::sync::Mutex<Option<Proxy>> {
     PROXY.get_or_init(|| tokio::sync::Mutex::new(None))
@@ -44,6 +45,10 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
         Ok(c) => c,
         Err(_) => return -1,
     };
+    {
+        let mut dns = PROXY_DNS.lock().unwrap_or_else(|e| e.into_inner());
+        *dns = Some(config.dns_server.clone());
+    }
     let rt = match runtime() {
         Some(rt) => rt,
         None => return -2,
@@ -66,10 +71,34 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_setTunFd(
     _class: JClass,
     fd: jint,
 ) {
-    let _raw: RawFd = fd;
-    // 数据面 worker（tun::create_as_async(raw_fd) → Tun2Socks poll 循环 → DNS 拦截）
-    // 在独立的「P1 数据面」计划中实现；此处仅接收 fd 并记录日志。
-    log::info!("tun fd received: {fd}");
+    let rt = match runtime() {
+        Some(rt) => rt,
+        None => return,
+    };
+    let raw: RawFd = fd;
+    let dns = PROXY_DNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| "8.8.8.8".to_string());
+    rt.spawn(async move {
+        let mut cfg = tun::Configuration::default();
+        cfg.raw_fd(raw);
+        let device = match tun::create_as_async(&cfg) {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("tun create failed: {e}");
+                return;
+            }
+        };
+        let socks = ssh2proxy_core::socks5::Socks5Dialer {
+            addr: "127.0.0.1:1080".parse().unwrap(),
+        };
+        let mut dp = ssh2proxy_core::dataplane::DataPlane::new(device, socks, dns);
+        if let Err(e) = dp.run().await {
+            log::error!("dataplane exited: {e}");
+        }
+    });
 }
 
 #[no_mangle]
