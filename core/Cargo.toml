@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 tokio = { workspace = true }
 russh = { workspace = true }
-smoltcp = { workspace = true }
 fast-socks5 = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
