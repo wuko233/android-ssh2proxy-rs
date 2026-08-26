@@ -201,7 +201,7 @@ mod tests {
     use super::*;
     use crate::packet::{TcpFlags, TcpSegment};
 
-    fn seg(seq: u32, ack: u32, flags: TcpFlags, payload: &[u8]) -> TcpSegment {
+    fn seg<'a>(seq: u32, ack: u32, flags: TcpFlags, payload: &'a [u8]) -> TcpSegment<'a> {
         TcpSegment { src_port: 40000, dst_port: 443, seq, ack, flags, window: 65535, payload }
     }
 
