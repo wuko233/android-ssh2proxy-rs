@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Notify};
 
 use crate::socks5::start_socks5_server;
 use crate::ssh::SshClient;
+use crate::udp::UdpRelayManager;
 
 /// Poll interval for the disconnect monitor. Kept short so a dropped session is
 /// detected promptly without busy-looping.
@@ -32,17 +33,23 @@ pub struct Proxy {
     config: ProxyConfig,
     ssh: Option<Arc<SshClient>>,
     socks_handle: Option<tokio::task::JoinHandle<()>>,
+    udp: Option<Arc<UdpRelayManager>>,
     state: ProxyState,
     tx: mpsc::UnboundedSender<StateEvent>,
     stop: Arc<Notify>,
 }
 
 impl Proxy {
-    pub fn new(config: ProxyConfig, tx: mpsc::UnboundedSender<StateEvent>) -> Self {
+    pub fn new(
+        config: ProxyConfig,
+        tx: mpsc::UnboundedSender<StateEvent>,
+        udp: Option<Arc<UdpRelayManager>>,
+    ) -> Self {
         Self {
             config,
             ssh: None,
             socks_handle: None,
+            udp,
             state: ProxyState::Disconnected,
             tx,
             stop: Arc::new(Notify::new()),
@@ -66,6 +73,7 @@ impl Proxy {
         let handle = start_socks5_server(ssh.clone(), "127.0.0.1:1080".parse()?);
         self.ssh = Some(ssh);
         self.socks_handle = Some(handle);
+        self.setup_udp().await;
         self.set_state(ProxyState::Connected);
         Ok(())
     }
@@ -76,16 +84,17 @@ impl Proxy {
         self.set_state(ProxyState::Disconnected);
     }
 
-    /// 通过当前 SSH 会话在服务器上启动 UDP 中继，返回封装好的中继。
-    pub async fn open_udp_relay(&self) -> Result<crate::udp::UdpRelay> {
-        let ssh = self
-            .ssh
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("not connected"))?;
-        let stream = ssh
-            .open_session_exec(&crate::udp::relay_command())
-            .await?;
-        Ok(crate::udp::UdpRelay::new(stream))
+    /// 在当前 SSH 会话上（重新）建立 UDP 中继；失败则记录并保持 TCP/DNS 可用。
+    async fn setup_udp(&self) {
+        let Some(mgr) = &self.udp else { return };
+        let Some(ssh) = &self.ssh else { return };
+        match ssh.open_session_exec(&crate::udp::relay_command()).await {
+            Ok(stream) => {
+                mgr.replace(stream);
+                log::info!("udp relay (re)established");
+            }
+            Err(e) => log::warn!("udp relay setup failed (UDP disabled): {e}"),
+        }
     }
 
     /// Drops the current SSH session and SOCKS5 server without changing state.
@@ -176,14 +185,14 @@ mod tests {
     #[test]
     fn proxy_starts_disconnected() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let p = Proxy::new(ProxyConfig::default(), tx);
+        let p = Proxy::new(ProxyConfig::default(), tx, None);
         assert_eq!(p.state(), ProxyState::Disconnected);
     }
 
     #[tokio::test]
     async fn disconnect_without_connect_is_safe() {
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut p = Proxy::new(ProxyConfig::default(), tx);
+        let mut p = Proxy::new(ProxyConfig::default(), tx, None);
         p.disconnect().await;
         assert_eq!(p.state(), ProxyState::Disconnected);
     }

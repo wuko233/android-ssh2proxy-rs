@@ -10,7 +10,7 @@ use crate::dns;
 use crate::packet::{self, Ipv4Header};
 use crate::socks5::Socks5Dialer;
 use crate::tcpflow::{Flow, FlowAction, FlowKey, FlowState};
-use crate::udp::UdpRelay;
+use crate::udp::{UdpRelayManager, UdpResponse};
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -36,13 +36,20 @@ pub struct DataPlane<T> {
     r2c_rx: mpsc::UnboundedReceiver<(FlowKey, UpstreamMsg)>,
     dns_tx: mpsc::UnboundedSender<Vec<u8>>,
     dns_rx: mpsc::UnboundedReceiver<Vec<u8>>,
-    udp: Option<UdpRelay>,
+    udp: Option<Arc<UdpRelayManager>>,
+    udp_rx: Option<mpsc::UnboundedReceiver<UdpResponse>>,
     udp_flows: HashMap<([u8; 4], u16), ([u8; 4], u16)>,
     stop: Arc<Notify>,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
-    pub fn new(tun: T, socks: Socks5Dialer, dns_server: String, udp: Option<UdpRelay>) -> Self {
+    pub fn new(
+        tun: T,
+        socks: Socks5Dialer,
+        dns_server: String,
+        udp: Option<Arc<UdpRelayManager>>,
+        udp_rx: Option<mpsc::UnboundedReceiver<UdpResponse>>,
+    ) -> Self {
         let (r2c_tx, r2c_rx) = mpsc::unbounded_channel();
         let (dns_tx, dns_rx) = mpsc::unbounded_channel();
         Self {
@@ -55,6 +62,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
             dns_tx,
             dns_rx,
             udp,
+            udp_rx,
             udp_flows: HashMap::new(),
             stop: Arc::new(Notify::new()),
         }
@@ -86,7 +94,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
                         None => break,
                     }
                 }
-                resp = recv_udp(&mut self.udp) => {
+                resp = recv_udp(&mut self.udp_rx) => {
                     if let Some((ip, port, payload)) = resp {
                         self.handle_udp_response(ip, port, payload).await;
                     }
@@ -265,9 +273,9 @@ fn rand_isn() -> u32 {
 }
 fn ip_to_str(ip: &[u8; 4]) -> String { format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]) }
 
-async fn recv_udp(udp: &mut Option<UdpRelay>) -> Option<([u8; 4], u16, Vec<u8>)> {
-    match udp {
-        Some(u) => u.response_rx.recv().await,
+async fn recv_udp(udp_rx: &mut Option<mpsc::UnboundedReceiver<UdpResponse>>) -> Option<UdpResponse> {
+    match udp_rx {
+        Some(rx) => rx.recv().await,
         None => std::future::pending().await,
     }
 }
@@ -281,7 +289,7 @@ mod tests {
     async fn syn_triggers_synack() {
         let (tun_end, mut app_end) = tokio::io::duplex(65536);
         let socks = Socks5Dialer { addr: "127.0.0.1:1080".parse().unwrap() };
-        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None);
+        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None, None);
         let handle = tokio::spawn(async move { dp.run().await });
 
         let iph = Ipv4Header { src: [10, 0, 0, 2], dst: [1, 2, 3, 4], protocol: 6, total_len: 0 };
@@ -320,7 +328,7 @@ mod tests {
     async fn non_syn_packet_does_not_create_flow() {
         let (tun_end, mut app_end) = tokio::io::duplex(65536);
         let socks = Socks5Dialer { addr: "127.0.0.1:1080".parse().unwrap() };
-        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None);
+        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None, None);
         let handle = tokio::spawn(async move { dp.run().await });
 
         let iph = Ipv4Header { src: [10, 0, 0, 2], dst: [1, 2, 3, 4], protocol: 6, total_len: 0 };

@@ -10,14 +10,15 @@ use jni::JNIEnv;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, Notify};
 
-use ssh2proxy_core::udp::UdpRelay;
+use ssh2proxy_core::udp::{UdpRelayManager, UdpResponse};
 use ssh2proxy_core::{Proxy, ProxyConfig, StateEvent};
 
 static RT: OnceLock<Runtime> = OnceLock::new();
 static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static TUN_STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
-static UDP_RELAY: Mutex<Option<UdpRelay>> = Mutex::new(None);
+static UDP_MGR: Mutex<Option<Arc<UdpRelayManager>>> = Mutex::new(None);
+static UDP_RESPONSE: Mutex<Option<mpsc::UnboundedReceiver<UdpResponse>>> = Mutex::new(None);
 static EVENTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
 fn push_event(line: String) {
@@ -111,19 +112,19 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
     );
     log::info!("dns server: {}", config.dns_server);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let mut proxy = Proxy::new(config, tx);
+    let (mgr, response_rx) = UdpRelayManager::new();
+    {
+        let mut slot = UDP_MGR.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(mgr.clone());
+    }
+    {
+        let mut slot = UDP_RESPONSE.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(response_rx);
+    }
+    let mut proxy = Proxy::new(config, tx, Some(mgr));
     match rt.block_on(proxy.connect()) {
         Ok(()) => {
             let stop = proxy.stop_handle();
-            // 建立 UDP 中继（失败则退化为仅 TCP/DNS，不影响连接）
-            match rt.block_on(proxy.open_udp_relay()) {
-                Ok(relay) => {
-                    let mut slot = UDP_RELAY.lock().unwrap_or_else(|e| e.into_inner());
-                    *slot = Some(relay);
-                    log::info!("udp relay established");
-                }
-                Err(e) => log::warn!("udp relay setup failed (UDP disabled): {e}"),
-            }
             rt.spawn(async move {
                 while let Some(ev) = rx.recv().await {
                     match ev {
@@ -175,11 +176,15 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_setTunFd(
         let socks = ssh2proxy_core::socks5::Socks5Dialer {
             addr: "127.0.0.1:1080".parse().unwrap(),
         };
-        let udp = UDP_RELAY
+        let udp = UDP_MGR
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let udp_rx = UDP_RESPONSE
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        let mut dp = ssh2proxy_core::dataplane::DataPlane::new(device, socks, dns, udp);
+        let mut dp = ssh2proxy_core::dataplane::DataPlane::new(device, socks, dns, udp, udp_rx);
         {
             let mut slot = TUN_STOP.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(dp.stop_handle());

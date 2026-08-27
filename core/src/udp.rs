@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
@@ -12,30 +14,57 @@ pub fn relay_command() -> String {
     )
 }
 
-/// UDP 数据报在 SSH 通道内的帧格式（与服务器端 relay 脚本一致）：
+/// UDP 响应：`(源 IPv4, 源端口, 载荷)`。源地址通常等于当初请求的目的地址。
+pub type UdpResponse = ([u8; 4], u16, Vec<u8>);
+
+/// 可替换的 UDP 中继：请求发送侧随 SSH 重连替换，响应接收侧固定共享。
 ///
-/// 请求（客户端 -> 服务器）：
-///   [2 字节大端长度 L][4 字节目的 IPv4][2 字节目的端口][L-6 字节 UDP 载荷]
-///
-/// 响应（服务器 -> 客户端）：
-///   [2 字节大端长度 L][4 字节源 IPv4][2 字节源端口][L-6 字节 UDP 载荷]
-///
-/// 响应中的「源地址」通常是当初请求的「目的地址」，客户端据此关联回原始 UDP 流。
-pub struct UdpRelay {
-    request_tx: mpsc::UnboundedSender<Vec<u8>>,
-    pub response_rx: mpsc::UnboundedReceiver<([u8; 4], u16, Vec<u8>)>,
+/// 帧格式（与服务器端 relay 脚本一致）：
+/// 请求：[2 字节大端长度 L][4 字节目的 IPv4][2 字节目的端口][L-6 字节载荷]
+/// 响应：[2 字节大端长度 L][4 字节源 IPv4][2 字节源端口][L-6 字节载荷]
+pub struct UdpRelayManager {
+    state: Arc<RelayState>,
 }
 
-impl UdpRelay {
-    /// `stream` 是连到服务器 relay 的 SSH 通道（AsyncRead + AsyncWrite，stdin/stdout）。
-    /// 内部起两个任务：一个把请求帧写进通道，一个从通道读响应帧。
-    pub fn new<S>(stream: S) -> Self
+struct RelayState {
+    request_tx: Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>,
+    response_tx: mpsc::UnboundedSender<UdpResponse>,
+}
+
+impl UdpRelayManager {
+    /// 创建管理器，返回共享句柄 + 唯一的响应接收端。
+    pub fn new() -> (Arc<Self>, mpsc::UnboundedReceiver<UdpResponse>) {
+        let (response_tx, response_rx) = mpsc::unbounded_channel();
+        let mgr = Arc::new(Self {
+            state: Arc::new(RelayState {
+                request_tx: Mutex::new(None),
+                response_tx,
+            }),
+        });
+        (mgr, response_rx)
+    }
+
+    /// 封装并发送一个 UDP 数据报到 `dst_ip:dst_port`（经当前中继）。
+    pub fn send(&self, dst_ip: [u8; 4], dst_port: u16, payload: &[u8]) {
+        let frame = build_request(dst_ip, dst_port, payload);
+        let tx = self
+            .state
+            .request_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        if let Some(tx) = tx {
+            let _ = tx.send(frame);
+        }
+    }
+
+    /// 用新的 SSH 通道替换当前中继（SSH 重连时调用）。
+    pub fn replace<S>(&self, stream: S)
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
         let (request_tx, mut request_rx) = mpsc::unbounded_channel::<Vec<u8>>();
-        let (response_tx, response_rx) = mpsc::unbounded_channel::<([u8; 4], u16, Vec<u8>)>();
-
+        let response_tx = self.state.response_tx.clone();
         let (mut read_half, mut write_half) = tokio::io::split(stream);
 
         tokio::spawn(async move {
@@ -69,22 +98,22 @@ impl UdpRelay {
             }
         });
 
-        Self {
-            request_tx,
-            response_rx,
-        }
+        *self
+            .state
+            .request_tx
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(request_tx);
     }
+}
 
-    /// 封装并发送一个 UDP 数据报到 `dst_ip:dst_port`。
-    pub fn send(&self, dst_ip: [u8; 4], dst_port: u16, payload: &[u8]) {
-        let len = 6 + payload.len();
-        let mut frame = Vec::with_capacity(2 + len);
-        frame.extend_from_slice(&(len as u16).to_be_bytes());
-        frame.extend_from_slice(&dst_ip);
-        frame.extend_from_slice(&dst_port.to_be_bytes());
-        frame.extend_from_slice(payload);
-        let _ = self.request_tx.send(frame);
-    }
+fn build_request(dst_ip: [u8; 4], dst_port: u16, payload: &[u8]) -> Vec<u8> {
+    let len = 6 + payload.len();
+    let mut frame = Vec::with_capacity(2 + len);
+    frame.extend_from_slice(&(len as u16).to_be_bytes());
+    frame.extend_from_slice(&dst_ip);
+    frame.extend_from_slice(&dst_port.to_be_bytes());
+    frame.extend_from_slice(payload);
+    frame
 }
 
 #[cfg(test)]
@@ -119,7 +148,8 @@ mod tests {
         rt.block_on(async {
             // 用 duplex 模拟 SSH 通道：客户端写请求、读响应；另一侧模拟服务器。
             let (client_side, mut server_side) = tokio::io::duplex(65536);
-            let mut relay = UdpRelay::new(client_side);
+            let (mgr, mut response_rx) = UdpRelayManager::new();
+            mgr.replace(client_side);
 
             // 模拟服务器：读请求帧，回一个响应帧
             tokio::spawn(async move {
@@ -142,8 +172,8 @@ mod tests {
                 server_side.write_all(&resp).await.unwrap();
             });
 
-            relay.send([1, 2, 3, 4], 53, b"hello");
-            let (ip, port, payload) = relay.response_rx.recv().await.unwrap();
+            mgr.send([1, 2, 3, 4], 53, b"hello");
+            let (ip, port, payload) = response_rx.recv().await.unwrap();
             assert_eq!(ip, [1, 2, 3, 4]);
             assert_eq!(port, 53);
             assert_eq!(payload, b"world");
