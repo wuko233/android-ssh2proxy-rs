@@ -5,14 +5,14 @@ use std::os::raw::c_char;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use jni::objects::{JClass, JString};
-use jni::sys::{jint, jstring};
+use jni::sys::{jboolean, jint, jstring};
 use jni::JNIEnv;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, Notify};
 
 use ssh2proxy_core::stats::TrafficStats;
 use ssh2proxy_core::udp::{UdpRelayManager, UdpResponse};
-use ssh2proxy_core::{Proxy, ProxyConfig, StateEvent};
+use ssh2proxy_core::{Proxy, ProxyConfig, ProxyState, StateEvent};
 
 static RT: OnceLock<Runtime> = OnceLock::new();
 static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
@@ -21,13 +21,32 @@ static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
 static UDP_MGR: Mutex<Option<Arc<UdpRelayManager>>> = Mutex::new(None);
 static UDP_RESPONSE: Mutex<Option<mpsc::UnboundedReceiver<UdpResponse>>> = Mutex::new(None);
 static STATS: Mutex<Option<Arc<TrafficStats>>> = Mutex::new(None);
-static EVENTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static EVENTS: Mutex<VecDeque<(u64, String)>> = Mutex::new(VecDeque::new());
+/// 0=Error 1=Warn 2=Info 3=Debug
+static LOG_LEVEL: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
 
 fn push_event(line: String) {
     let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
-    q.push_back(line);
+    q.push_back((now_millis(), line));
     while q.len() > 500 {
         q.pop_front();
+    }
+}
+
+fn level_u8(l: log::Level) -> u8 {
+    match l {
+        log::Level::Error => 0,
+        log::Level::Warn => 1,
+        log::Level::Info => 2,
+        log::Level::Debug => 3,
+        log::Level::Trace => 4,
     }
 }
 
@@ -36,14 +55,14 @@ static LOGGER: CombinedLogger = CombinedLogger;
 
 impl log::Log for CombinedLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Info
+        level_u8(metadata.level()) <= LOG_LEVEL.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     fn log(&self, record: &log::Record) {
         if !self.enabled(record.metadata()) {
             return;
         }
-        let line = format!("[{}] {}", record.level(), record.args());
+        let line = record.args().to_string();
         push_event(line.clone());
         #[cfg(target_os = "android")]
         {
@@ -83,8 +102,18 @@ fn runtime() -> Option<&'static Runtime> {
 #[no_mangle]
 pub extern "system" fn JNI_OnLoad(_vm: jni::JavaVM, _reserved: *mut std::ffi::c_void) -> jint {
     let _ = log::set_logger(&LOGGER);
-    log::set_max_level(log::LevelFilter::Info);
+    log::set_max_level(log::LevelFilter::Debug);
     jni::sys::JNI_VERSION_1_6
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_setLogLevel(
+    _env: JNIEnv,
+    _class: JClass,
+    debug: jboolean,
+) {
+    let level = if debug != 0 { 3u8 } else { 2u8 };
+    LOG_LEVEL.store(level, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[no_mangle]
@@ -106,36 +135,54 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
         Some(rt) => rt,
         None => return -2,
     };
-    log::info!(
-        "connecting to {}:{} as {} (password auth)",
-        config.host,
-        config.port,
-        config.username
-    );
-    log::info!("dns server: {}", config.dns_server);
+    log::info!("Connecting to {}:{}", config.host, config.port);
+    log::info!("DNS: {}", config.dns_server);
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let (mgr, response_rx) = UdpRelayManager::new();
-    {
-        let mut slot = UDP_MGR.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = Some(mgr.clone());
-    }
-    {
-        let mut slot = UDP_RESPONSE.lock().unwrap_or_else(|e| e.into_inner());
-        *slot = Some(response_rx);
-    }
+    let udp = if config.udp_enabled {
+        let (mgr, response_rx) = UdpRelayManager::new();
+        {
+            let mut slot = UDP_MGR.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = Some(mgr.clone());
+        }
+        {
+            let mut slot = UDP_RESPONSE.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = Some(response_rx);
+        }
+        Some(mgr)
+    } else {
+        {
+            let mut slot = UDP_MGR.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = None;
+        }
+        {
+            let mut slot = UDP_RESPONSE.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = None;
+        }
+        None
+    };
     {
         // 每次连接重置流量统计
         let mut slot = STATS.lock().unwrap_or_else(|e| e.into_inner());
         *slot = Some(Arc::new(TrafficStats::default()));
     }
-    let mut proxy = Proxy::new(config, tx, Some(mgr));
+    log::info!("UDP: {}", if config.udp_enabled { "enabled" } else { "disabled" });
+    let mut proxy = Proxy::new(config, tx, udp);
     match rt.block_on(proxy.connect()) {
         Ok(()) => {
             let stop = proxy.stop_handle();
             rt.spawn(async move {
                 while let Some(ev) = rx.recv().await {
                     match ev {
-                        StateEvent::StateChanged(s) => log::info!("state: {:?}", s),
+                        StateEvent::StateChanged(s) => {
+                            let msg = match s {
+                                ProxyState::Disconnected => "Disconnected",
+                                ProxyState::Connecting => "Connecting",
+                                ProxyState::Connected => "Connected",
+                                ProxyState::Reconnecting => "Reconnecting",
+                                ProxyState::Error => "Error",
+                            };
+                            log::info!("{msg}");
+                        }
                         StateEvent::Error(e) => log::error!("{e}"),
                         StateEvent::Log(l) => log::info!("{l}"),
                     }
@@ -144,11 +191,11 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
             rt.spawn(async move { let _ = proxy.run_reconnect_loop().await; });
             let mut slot = STOP.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(stop);
-            log::info!("connected; socks5 listening on 127.0.0.1:1080");
+            log::info!("Socks5 server on 127.0.0.1:1080");
             0
         }
         Err(e) => {
-            log::error!("connect failed: {e}");
+            log::error!("Connect failed: {e}");
             -2
         }
     }
@@ -253,11 +300,11 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_pollEvents(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    let lines: Vec<String> = {
+    let events: Vec<(u64, String)> = {
         let mut q = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
         q.drain(..).collect()
     };
-    let json = serde_json::to_string(&lines).unwrap_or_else(|_| "[]".to_string());
+    let json = serde_json::to_string(&events).unwrap_or_else(|_| "[]".to_string());
     match env.new_string(json) {
         Ok(s) => s.into_raw(),
         Err(_) => std::ptr::null_mut(),

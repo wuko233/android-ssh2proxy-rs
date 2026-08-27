@@ -35,11 +35,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NativeBridge.setLogLevel(SettingsStore.logDebug(applicationContext))
         setContent { App() }
     }
 }
@@ -59,31 +63,60 @@ fun App() {
         var showAdd by remember { mutableStateOf(false) }
         var testResult by remember { mutableStateOf<String?>(null) }
         var testing by remember { mutableStateOf(false) }
-        var traffic by remember { mutableStateOf("") }
+        var trafficUp by remember { mutableStateOf(0L) }
+        var trafficDown by remember { mutableStateOf(0L) }
+        var logLines by remember { mutableStateOf(listOf<String>()) }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
+        val sdf = remember { SimpleDateFormat("HH:mm", Locale.US) }
+
+        // 持续拉取日志（提升到全局，避免切页丢日志）
+        LaunchedEffect(Unit) {
+            while (true) {
+                try {
+                    val json = NativeBridge.pollEvents()
+                    if (!json.isNullOrEmpty() && json != "[]") {
+                        val arr = JSONArray(json)
+                        val new = (0 until arr.length()).map { i ->
+                            val pair = arr.getJSONArray(i)
+                            "[${sdf.format(Date(pair.getLong(0)))}] ${pair.getString(1)}"
+                        }
+                        if (new.isNotEmpty()) {
+                            logLines = (logLines + new).takeLast(1000)
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+                delay(400)
+            }
+        }
 
         LaunchedEffect(connected) {
             while (connected) {
                 try {
                     val o = JSONObject(NativeBridge.getStats())
-                    traffic = "↑ ${formatBytes(o.optLong("up"))}   ↓ ${formatBytes(o.optLong("down"))}"
+                    trafficUp = o.optLong("up")
+                    trafficDown = o.optLong("down")
                 } catch (_: Exception) {
                 }
                 delay(1000)
             }
-            if (!connected) traffic = ""
+            if (!connected) {
+                trafficUp = 0L
+                trafficDown = 0L
+            }
         }
 
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
             val cfg = JSONObject().put("host", p.host).put("port", p.port)
                 .put("username", p.username).put("auth", auth)
-                .put("dns_server", p.dnsServer).toString()
+                .put("dns_server", p.dnsServer)
+                .put("udp_enabled", SettingsStore.udpEnabled(ctx)).toString()
             if (NativeBridge.connect(cfg) == 0) {
                 ctx.startService(Intent(ctx, SshVpnService::class.java))
                 connected = true
-                status = "已连接"
+                status = ""
             } else {
                 status = "连接失败（请检查主机/端口/账号）"
             }
@@ -176,25 +209,40 @@ fun App() {
                 when (tab) {
                     0 -> {
                         Column(Modifier.fillMaxSize().padding(16.dp)) {
-                            if (status.isNotEmpty()) {
+                            if (connected) {
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                ) {
+                                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                        Text("已连接", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                        Spacer(Modifier.height(12.dp))
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Column(Modifier.weight(1f)) {
+                                                Text("上传", style = MaterialTheme.typography.bodySmall)
+                                                Text(formatBytes(trafficUp), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                            }
+                                            VerticalDivider(Modifier.height(40.dp))
+                                            Column(Modifier.weight(1f)) {
+                                                Text("下载", style = MaterialTheme.typography.bodySmall)
+                                                Text(formatBytes(trafficDown), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                            }
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(12.dp))
+                            } else if (status.isNotEmpty()) {
                                 Surface(
                                     modifier = Modifier.fillMaxWidth(),
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (connected) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceVariant
+                                    color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
                                     Text(
                                         "状态：$status",
-                                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp),
+                                        modifier = Modifier.padding(12.dp),
                                         fontWeight = FontWeight.Medium
                                     )
-                                    if (connected && traffic.isNotEmpty()) {
-                                        Text(
-                                            "流量：$traffic",
-                                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
                                 }
                                 Spacer(Modifier.height(12.dp))
                             }
@@ -255,7 +303,7 @@ fun App() {
                             }
                         }
                     }
-                    1 -> LogTab()
+                    1 -> LogTab(logLines) { logLines = emptyList() }
                     else -> SettingsTab()
                 }
             }
@@ -318,34 +366,15 @@ fun formatBytes(b: Long): String {
     val mb = kb * 1024
     val gb = mb * 1024
     return when {
-        b >= gb -> String.format(java.util.Locale.US, "%.2f GB", b / gb)
-        b >= mb -> String.format(java.util.Locale.US, "%.2f MB", b / mb)
-        b >= kb -> String.format(java.util.Locale.US, "%.1f KB", b / kb)
+        b >= gb -> String.format(Locale.US, "%.2f GB", b / gb)
+        b >= mb -> String.format(Locale.US, "%.2f MB", b / mb)
+        b >= kb -> String.format(Locale.US, "%.1f KB", b / kb)
         else -> "$b B"
     }
 }
 
 @Composable
-fun LogTab() {
-    var lines by remember { mutableStateOf(listOf<String>()) }
-
-    LaunchedEffect(Unit) {
-        while (true) {
-            try {
-                val json = NativeBridge.pollEvents()
-                if (!json.isNullOrEmpty() && json != "[]") {
-                    val arr = JSONArray(json)
-                    val new = (0 until arr.length()).map { arr.getString(it) }
-                    if (new.isNotEmpty()) {
-                        lines = (lines + new).takeLast(1000)
-                    }
-                }
-            } catch (_: Exception) {
-            }
-            delay(400)
-        }
-    }
-
+fun LogTab(lines: List<String>, onClear: () -> Unit) {
     val listState = rememberLazyListState()
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
@@ -356,7 +385,7 @@ fun LogTab() {
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.End
         ) {
-            TextButton(onClick = { lines = emptyList() }) { Text("清空") }
+            TextButton(onClick = onClear) { Text("清空") }
         }
         if (lines.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -381,8 +410,44 @@ fun LogTab() {
 @Composable
 fun SettingsTab() {
     val ctx = LocalContext.current
+    var udp by remember { mutableStateOf(SettingsStore.udpEnabled(ctx)) }
+    var logDebug by remember { mutableStateOf(SettingsStore.logDebug(ctx)) }
     var cleared by remember { mutableStateOf(false) }
+
     Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("网络", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("UDP 转发", style = MaterialTheme.typography.bodyLarge)
+                Text("通过 SSH 隧道转发 UDP 流量（QUIC/游戏语音）", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = udp, onCheckedChange = {
+                udp = it
+                SettingsStore.setUdpEnabled(ctx, it)
+            })
+        }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+
+        Text("日志", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("详细日志", style = MaterialTheme.typography.bodyLarge)
+                Text("输出 Debug 级别日志（排查问题时开启）", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = logDebug, onCheckedChange = {
+                logDebug = it
+                SettingsStore.setLogDebug(ctx, it)
+                NativeBridge.setLogLevel(it)
+            })
+        }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+
         Text("关于", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text("SSH2Proxy v0.1.0")

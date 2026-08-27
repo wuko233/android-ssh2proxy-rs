@@ -20,6 +20,7 @@ pub struct ProxyConfig {
     pub keepalive_max: u32,
     pub inactivity_timeout: Option<Duration>,
     pub dns_server: String, // 远程解析器 host，默认 "8.8.8.8"
+    pub udp_enabled: bool,
 }
 
 impl Default for ProxyConfig {
@@ -33,6 +34,7 @@ impl Default for ProxyConfig {
             keepalive_max: 3,
             inactivity_timeout: Some(Duration::from_secs(30)),
             dns_server: "8.8.8.8".into(),
+            udp_enabled: true,
         }
     }
 }
