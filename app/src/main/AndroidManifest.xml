@@ -11,6 +11,7 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity android:name=".LogActivity" android:exported="false" />
         <service
             android:name=".SshVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"

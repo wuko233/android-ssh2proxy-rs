@@ -72,6 +72,7 @@ async fn serve(ssh: Arc<SshClient>, socket: tokio::net::TcpStream) -> anyhow::Re
         anyhow::bail!("non-TCP command");
     }
     let (host, port) = target.into_string_and_port();
+    log::debug!("socks5 connect request -> {host}:{port}");
     let channel = ssh.open_tcpip(&host, port).await.context("open_tcpip")?;
     let stream = channel.into_stream();
     let inner = proto

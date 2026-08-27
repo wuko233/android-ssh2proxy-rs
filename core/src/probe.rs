@@ -8,6 +8,7 @@ use crate::socks5::Socks5Dialer;
 #[derive(Debug, Clone, Serialize)]
 pub struct ProbeResult {
     pub domain: String,
+    pub socks_tcp_ok: bool,
     pub dns_ok: bool,
     pub resolved_ips: Vec<String>,
     pub tcp_connect_ok: bool,
@@ -88,12 +89,36 @@ pub fn parse_a_records(resp: &[u8]) -> Vec<String> {
 }
 
 pub async fn connectivity_test(dialer: &Socks5Dialer, dns_server: &str, domain: &str) -> ProbeResult {
-    let query = build_a_query(domain);
-    let mut resolved_ips = Vec::new();
-    let mut dns_ok = false;
-    let mut tcp_connect_ok = false;
-    let mut error = None;
+    let mut result = ProbeResult {
+        domain: domain.to_string(),
+        socks_tcp_ok: false,
+        dns_ok: false,
+        resolved_ips: Vec::new(),
+        tcp_connect_ok: false,
+        error: None,
+    };
 
+    // Stage 1: plain TCP connect to the DNS server's port 53 via SOCKS5/SSH.
+    // This exercises SSH -> direct-tcpip -> remote egress, without any DNS protocol.
+    match tokio::time::timeout(Duration::from_secs(10), dialer.connect(dns_server, 53)).await {
+        Ok(Ok(_)) => {
+            result.socks_tcp_ok = true;
+            log::info!("probe: socks5 tcp connect to {dns_server}:53 ok");
+        }
+        Ok(Err(e)) => {
+            result.error = Some(format!("socks5 connect to {dns_server}:53 failed: {e}"));
+            log::warn!("probe: {}", result.error.as_deref().unwrap_or_default());
+            return result;
+        }
+        Err(_) => {
+            result.error = Some(format!("socks5 connect to {dns_server}:53 timed out"));
+            log::warn!("probe: {}", result.error.as_deref().unwrap_or_default());
+            return result;
+        }
+    }
+
+    // Stage 2: DNS-over-TCP resolution of `domain` through the tunnel.
+    let query = build_a_query(domain);
     match tokio::time::timeout(
         Duration::from_secs(10),
         dns::resolve(|h, p| async move { dialer.connect(&h, p).await }, dns_server, &query),
@@ -101,28 +126,32 @@ pub async fn connectivity_test(dialer: &Socks5Dialer, dns_server: &str, domain: 
     .await
     {
         Ok(Ok(answer)) => {
-            dns_ok = !answer.is_empty();
-            resolved_ips = parse_a_records(&answer);
+            result.dns_ok = !answer.is_empty();
+            result.resolved_ips = parse_a_records(&answer);
+            log::info!("probe: dns resolve {} -> {:?}", domain, result.resolved_ips);
         }
-        Ok(Err(e)) => error = Some(format!("dns: {e}")),
-        Err(_) => error = Some("dns timeout".to_string()),
+        Ok(Err(e)) => {
+            result.error = Some(format!("dns resolve: {e}"));
+            log::warn!("probe: {}", result.error.as_deref().unwrap_or_default());
+            return result;
+        }
+        Err(_) => {
+            result.error = Some("dns resolve timed out".to_string());
+            log::warn!("probe: {}", result.error.as_deref().unwrap_or_default());
+            return result;
+        }
     }
 
-    if let Some(ip) = resolved_ips.first() {
+    // Stage 3: TCP connect to the first resolved IP on port 443.
+    if let Some(ip) = result.resolved_ips.first() {
         match tokio::time::timeout(Duration::from_secs(10), dialer.connect(ip, 443)).await {
-            Ok(Ok(_)) => tcp_connect_ok = true,
-            Ok(Err(e)) => error = Some(format!("tcp connect: {e}")),
-            Err(_) => error = Some("tcp connect timeout".to_string()),
+            Ok(Ok(_)) => result.tcp_connect_ok = true,
+            Ok(Err(e)) => result.error = Some(format!("tcp connect {ip}:443: {e}")),
+            Err(_) => result.error = Some(format!("tcp connect {ip}:443 timed out")),
         }
     }
 
-    ProbeResult {
-        domain: domain.to_string(),
-        dns_ok,
-        resolved_ips,
-        tcp_connect_ok,
-        error,
-    }
+    result
 }
 
 #[cfg(test)]

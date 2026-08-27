@@ -12,7 +12,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -25,10 +24,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -51,28 +48,10 @@ fun App() {
         var status by remember { mutableStateOf("") }
         var editing by remember { mutableStateOf<Profile?>(null) }
         var showAdd by remember { mutableStateOf(false) }
-        var logLines by remember { mutableStateOf(listOf<String>()) }
         var testResult by remember { mutableStateOf<String?>(null) }
         var testing by remember { mutableStateOf(false) }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
-
-        LaunchedEffect(Unit) {
-            while (true) {
-                try {
-                    val json = NativeBridge.pollEvents()
-                    if (!json.isNullOrEmpty() && json != "[]") {
-                        val arr = JSONArray(json)
-                        val new = (0 until arr.length()).map { arr.getString(it) }
-                        if (new.isNotEmpty()) {
-                            logLines = (logLines + new).takeLast(500)
-                        }
-                    }
-                } catch (_: Exception) {
-                }
-                delay(500)
-            }
-        }
 
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
@@ -205,7 +184,10 @@ fun App() {
                 }
 
                 Spacer(Modifier.height(8.dp))
-                LogView(logLines)
+                OutlinedButton(
+                    onClick = { ctx.startActivity(Intent(ctx, LogActivity::class.java)) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("查看日志") }
             }
         }
 
@@ -240,6 +222,7 @@ fun formatProbeResult(json: String?): String {
     if (json.isNullOrEmpty()) return "测试失败（无响应）"
     return try {
         val o = JSONObject(json)
+        val socksTcp = o.optBoolean("socks_tcp_ok")
         val dnsOk = o.optBoolean("dns_ok")
         val ips = o.optJSONArray("resolved_ips")
         val ipsStr = if (ips != null && ips.length() > 0) {
@@ -249,6 +232,7 @@ fun formatProbeResult(json: String?): String {
         val err = o.optString("error")
         buildString {
             append("域名: ").append(o.optString("domain")).append('\n')
+            append("隧道TCP连通: ").append(if (socksTcp) "✓" else "✗").append('\n')
             append("DNS 解析: ").append(if (dnsOk) "✓ 成功" else "✗ 失败").append('\n')
             append("解析 IP: ").append(ipsStr).append('\n')
             append("TCP 连通(443): ").append(if (tcpOk) "✓ 成功" else "✗ 失败")
@@ -256,34 +240,6 @@ fun formatProbeResult(json: String?): String {
         }
     } catch (_: Exception) {
         "测试失败: $json"
-    }
-}
-
-@Composable
-fun LogView(lines: List<String>) {
-    val listState = rememberLazyListState()
-    LaunchedEffect(lines.size) {
-        if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
-    }
-    Card(Modifier.fillMaxWidth().height(180.dp)) {
-        Column {
-            Text("运行日志", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), fontWeight = FontWeight.Bold)
-            if (lines.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无日志", style = MaterialTheme.typography.bodySmall)
-                }
-            } else {
-                LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                    items(lines) { line ->
-                        Text(
-                            line,
-                            Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
