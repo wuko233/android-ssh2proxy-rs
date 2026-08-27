@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use crate::dns;
 use crate::packet::{self, Ipv4Header};
 use crate::socks5::Socks5Dialer;
+use crate::stats::TrafficStats;
 use crate::tcpflow::{Flow, FlowAction, FlowKey, FlowState};
 use crate::udp::{UdpRelayManager, UdpResponse};
 
@@ -39,6 +40,7 @@ pub struct DataPlane<T> {
     udp: Option<Arc<UdpRelayManager>>,
     udp_rx: Option<mpsc::UnboundedReceiver<UdpResponse>>,
     udp_flows: HashMap<([u8; 4], u16), ([u8; 4], u16)>,
+    stats: Arc<TrafficStats>,
     stop: Arc<Notify>,
 }
 
@@ -49,6 +51,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
         dns_server: String,
         udp: Option<Arc<UdpRelayManager>>,
         udp_rx: Option<mpsc::UnboundedReceiver<UdpResponse>>,
+        stats: Arc<TrafficStats>,
     ) -> Self {
         let (r2c_tx, r2c_rx) = mpsc::unbounded_channel();
         let (dns_tx, dns_rx) = mpsc::unbounded_channel();
@@ -64,6 +67,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
             udp,
             udp_rx,
             udp_flows: HashMap::new(),
+            stats,
             stop: Arc::new(Notify::new()),
         }
     }
@@ -79,6 +83,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
                 r = self.tun.read(&mut buf) => {
                     let n = r?;
                     if n == 0 { continue; }
+                    self.stats.add_up(n as u64);
                     self.handle_tun_packet(&buf[..n]).await;
                     self.sweep_idle();
                 }
@@ -90,7 +95,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
                 }
                 pkt = self.dns_rx.recv() => {
                     match pkt {
-                        Some(pkt) => { let _ = self.tun.write_all(&pkt).await; }
+                        Some(pkt) => { self.write_tun(&pkt).await; }
                         None => break,
                     }
                 }
@@ -221,7 +226,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
                 total_len: 0,
             };
             let pkt = packet::build_udp_packet(&resp_iph, src_port, app_port, &payload);
-            let _ = self.tun.write_all(&pkt).await;
+            self.write_tun(&pkt).await;
         }
     }
 
@@ -241,11 +246,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
         self.flows.retain(|_, h| now.duration_since(h.last_activity) < IDLE_TIMEOUT);
     }
 
+    async fn write_tun(&mut self, pkt: &[u8]) {
+        let _ = self.tun.write_all(pkt).await;
+        self.stats.add_down(pkt.len() as u64);
+    }
+
     async fn apply(&mut self, key: FlowKey, actions: Vec<FlowAction>) {
         let mut done = false;
         for a in actions {
             match a {
-                FlowAction::SendToClient(pkt) => { let _ = self.tun.write_all(&pkt).await; }
+                FlowAction::SendToClient(pkt) => { self.write_tun(&pkt).await; }
                 FlowAction::SendUpstream(d) => {
                     if let Some(h) = self.flows.get(&key) { let _ = h.c2r_tx.send(d); }
                 }
@@ -289,7 +299,7 @@ mod tests {
     async fn syn_triggers_synack() {
         let (tun_end, mut app_end) = tokio::io::duplex(65536);
         let socks = Socks5Dialer { addr: "127.0.0.1:1080".parse().unwrap() };
-        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None, None);
+        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None, None, Arc::new(crate::stats::TrafficStats::default()));
         let handle = tokio::spawn(async move { dp.run().await });
 
         let iph = Ipv4Header { src: [10, 0, 0, 2], dst: [1, 2, 3, 4], protocol: 6, total_len: 0 };
@@ -328,7 +338,7 @@ mod tests {
     async fn non_syn_packet_does_not_create_flow() {
         let (tun_end, mut app_end) = tokio::io::duplex(65536);
         let socks = Socks5Dialer { addr: "127.0.0.1:1080".parse().unwrap() };
-        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None, None);
+        let mut dp = DataPlane::new(tun_end, socks, "1.1.1.1".to_string(), None, None, Arc::new(crate::stats::TrafficStats::default()));
         let handle = tokio::spawn(async move { dp.run().await });
 
         let iph = Ipv4Header { src: [10, 0, 0, 2], dst: [1, 2, 3, 4], protocol: 6, total_len: 0 };

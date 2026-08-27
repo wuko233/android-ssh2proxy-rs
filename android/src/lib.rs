@@ -10,6 +10,7 @@ use jni::JNIEnv;
 use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, Notify};
 
+use ssh2proxy_core::stats::TrafficStats;
 use ssh2proxy_core::udp::{UdpRelayManager, UdpResponse};
 use ssh2proxy_core::{Proxy, ProxyConfig, StateEvent};
 
@@ -19,6 +20,7 @@ static TUN_STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
 static UDP_MGR: Mutex<Option<Arc<UdpRelayManager>>> = Mutex::new(None);
 static UDP_RESPONSE: Mutex<Option<mpsc::UnboundedReceiver<UdpResponse>>> = Mutex::new(None);
+static STATS: Mutex<Option<Arc<TrafficStats>>> = Mutex::new(None);
 static EVENTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
 fn push_event(line: String) {
@@ -121,6 +123,11 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
         let mut slot = UDP_RESPONSE.lock().unwrap_or_else(|e| e.into_inner());
         *slot = Some(response_rx);
     }
+    {
+        // 每次连接重置流量统计
+        let mut slot = STATS.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(Arc::new(TrafficStats::default()));
+    }
     let mut proxy = Proxy::new(config, tx, Some(mgr));
     match rt.block_on(proxy.connect()) {
         Ok(()) => {
@@ -184,7 +191,12 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_setTunFd(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take();
-        let mut dp = ssh2proxy_core::dataplane::DataPlane::new(device, socks, dns, udp, udp_rx);
+        let stats = STATS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_default();
+        let mut dp = ssh2proxy_core::dataplane::DataPlane::new(device, socks, dns, udp, udp_rx, stats);
         {
             let mut slot = TUN_STOP.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(dp.stop_handle());
@@ -223,7 +235,14 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_getStats(
     env: JNIEnv,
     _class: JClass,
 ) -> jstring {
-    match env.new_string("{}") {
+    let stats = STATS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_default();
+    let (up, down) = stats.snapshot();
+    let json = format!("{{\"up\":{up},\"down\":{down}}}");
+    match env.new_string(json) {
         Ok(s) => s.into_raw(),
         Err(_) => std::ptr::null_mut(),
     }

@@ -2,6 +2,7 @@ pub mod dns;
 pub mod dataplane;
 pub mod packet;
 pub mod probe;
+pub mod stats;
 pub mod tcpflow;
 pub mod socks5;
 pub mod ssh;

@@ -59,8 +59,21 @@ fun App() {
         var showAdd by remember { mutableStateOf(false) }
         var testResult by remember { mutableStateOf<String?>(null) }
         var testing by remember { mutableStateOf(false) }
+        var traffic by remember { mutableStateOf("") }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
+
+        LaunchedEffect(connected) {
+            while (connected) {
+                try {
+                    val o = JSONObject(NativeBridge.getStats())
+                    traffic = "↑ ${formatBytes(o.optLong("up"))}   ↓ ${formatBytes(o.optLong("down"))}"
+                } catch (_: Exception) {
+                }
+                delay(1000)
+            }
+            if (!connected) traffic = ""
+        }
 
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
@@ -172,9 +185,16 @@ fun App() {
                                 ) {
                                     Text(
                                         "状态：$status",
-                                        modifier = Modifier.padding(12.dp),
+                                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 12.dp),
                                         fontWeight = FontWeight.Medium
                                     )
+                                    if (connected && traffic.isNotEmpty()) {
+                                        Text(
+                                            "流量：$traffic",
+                                            modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
                                 }
                                 Spacer(Modifier.height(12.dp))
                             }
@@ -290,6 +310,18 @@ fun formatProbeResult(json: String?): String {
         }
     } catch (_: Exception) {
         "测试失败: $json"
+    }
+}
+
+fun formatBytes(b: Long): String {
+    val kb = 1024.0
+    val mb = kb * 1024
+    val gb = mb * 1024
+    return when {
+        b >= gb -> String.format(java.util.Locale.US, "%.2f GB", b / gb)
+        b >= mb -> String.format(java.util.Locale.US, "%.2f MB", b / mb)
+        b >= kb -> String.format(java.util.Locale.US, "%.1f KB", b / kb)
+        else -> "$b B"
     }
 }
 
