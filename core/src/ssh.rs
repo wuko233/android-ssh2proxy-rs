@@ -83,6 +83,17 @@ impl SshClient {
             .context("direct-tcpip open failed")
     }
 
+    /// 打开一个 session channel 并执行远程命令，返回该命令 stdin/stdout 组成的双向流。
+    pub async fn open_session_exec(
+        &self,
+        command: &str,
+    ) -> Result<russh::ChannelStream<russh::client::Msg>> {
+        let handle = self.handle.lock().await;
+        let channel = handle.channel_open_session().await.context("open session")?;
+        channel.exec(true, command).await.context("exec failed")?;
+        Ok(channel.into_stream())
+    }
+
     pub async fn disconnect(&self) {
         let handle = self.handle.lock().await;
         let _ = handle

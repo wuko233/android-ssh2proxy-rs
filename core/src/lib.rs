@@ -6,6 +6,7 @@ pub mod tcpflow;
 pub mod socks5;
 pub mod ssh;
 pub mod state;
+pub mod udp;
 pub use state::{Auth, ProxyConfig, ProxyState, StateEvent};
 
 use std::sync::Arc;
@@ -73,6 +74,18 @@ impl Proxy {
         self.stop.notify_one();
         self.teardown().await;
         self.set_state(ProxyState::Disconnected);
+    }
+
+    /// 通过当前 SSH 会话在服务器上启动 UDP 中继，返回封装好的中继。
+    pub async fn open_udp_relay(&self) -> Result<crate::udp::UdpRelay> {
+        let ssh = self
+            .ssh
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("not connected"))?;
+        let stream = ssh
+            .open_session_exec(&crate::udp::relay_command())
+            .await?;
+        Ok(crate::udp::UdpRelay::new(stream))
     }
 
     /// Drops the current SSH session and SOCKS5 server without changing state.
