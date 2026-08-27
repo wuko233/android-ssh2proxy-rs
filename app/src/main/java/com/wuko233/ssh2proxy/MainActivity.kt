@@ -35,6 +35,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -69,6 +71,7 @@ fun App() {
         var trafficDown by remember { mutableStateOf(0L) }
         var logLines by remember { mutableStateOf(listOf<String>()) }
         var localMode by remember { mutableStateOf(false) }
+        val localIp = remember { getLocalIp() }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
         val sdf = remember { SimpleDateFormat("HH:mm", Locale.US) }
@@ -125,10 +128,14 @@ fun App() {
 
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
+            val bind = if (SettingsStore.lanShare(ctx)) "0.0.0.0" else "127.0.0.1"
             val cfg = JSONObject().put("host", p.host).put("port", p.port)
                 .put("username", p.username).put("auth", auth)
                 .put("dns_server", p.dnsServer)
-                .put("udp_enabled", SettingsStore.udpEnabled(ctx)).toString()
+                .put("udp_enabled", SettingsStore.udpEnabled(ctx))
+                .put("bind_addr", bind)
+                .put("socks_port", SettingsStore.socksPort(ctx))
+                .put("http_port", SettingsStore.httpPort(ctx)).toString()
             if (NativeBridge.connect(cfg) == 0) {
                 if (SettingsStore.localProxyMode(ctx)) {
                     localMode = true
@@ -234,8 +241,15 @@ fun App() {
                 when (tab) {
                     0 -> {
                         Column(Modifier.fillMaxSize().padding(16.dp)) {
+                            Text("本机 IP：$localIp", style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(8.dp))
                             if (connected) {
                                 if (localMode) {
+                                    val lan = SettingsStore.lanShare(ctx)
+                                    val socksHost = if (lan) localIp else "127.0.0.1"
+                                    val httpHost = if (lan) localIp else "127.0.0.1"
+                                    val socksPort = SettingsStore.socksPort(ctx)
+                                    val httpPort = SettingsStore.httpPort(ctx)
                                     Card(
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp),
@@ -244,10 +258,10 @@ fun App() {
                                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
                                             Text("本地代理已启动", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                             Spacer(Modifier.height(8.dp))
-                                            Text("SOCKS5: 127.0.0.1:1080", style = MaterialTheme.typography.bodyMedium)
-                                            Text("HTTP:   127.0.0.1:8888", style = MaterialTheme.typography.bodyMedium)
+                                            Text("SOCKS5: $socksHost:$socksPort", style = MaterialTheme.typography.bodyMedium)
+                                            Text("HTTP:   $httpHost:$httpPort", style = MaterialTheme.typography.bodyMedium)
                                             Spacer(Modifier.height(8.dp))
-                                            Text("其他 App 请把代理地址设为上面任意一个", style = MaterialTheme.typography.bodySmall)
+                                            Text(if (lan) "局域网内其他设备可连接上面的地址" else "仅本机可用，局域网共享请在设置开启", style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
                                 } else {
@@ -457,6 +471,27 @@ fun formatBytes(b: Long): String {
     }
 }
 
+fun getLocalIp(): String {
+    try {
+        val interfaces = NetworkInterface.getNetworkInterfaces()
+        while (interfaces.hasMoreElements()) {
+            val nif = interfaces.nextElement()
+            val addrs = nif.inetAddresses
+            while (addrs.hasMoreElements()) {
+                val addr = addrs.nextElement()
+                if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                    val host = addr.hostAddress
+                    if (host != null && !host.startsWith("169.254.")) {
+                        return host
+                    }
+                }
+            }
+        }
+    } catch (_: Exception) {
+    }
+    return "未知"
+}
+
 @Composable
 fun LogTab(lines: List<String>, onClear: () -> Unit) {
     val listState = rememberLazyListState()
@@ -497,6 +532,9 @@ fun SettingsTab() {
     var udp by remember { mutableStateOf(SettingsStore.udpEnabled(ctx)) }
     var logDebug by remember { mutableStateOf(SettingsStore.logDebug(ctx)) }
     var localProxy by remember { mutableStateOf(SettingsStore.localProxyMode(ctx)) }
+    var lanShare by remember { mutableStateOf(SettingsStore.lanShare(ctx)) }
+    var socksPortStr by remember { mutableStateOf(SettingsStore.socksPort(ctx).toString()) }
+    var httpPortStr by remember { mutableStateOf(SettingsStore.httpPort(ctx).toString()) }
     var cleared by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -515,6 +553,17 @@ fun SettingsTab() {
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
+                Text("局域网共享", style = MaterialTheme.typography.bodyLarge)
+                Text("监听 0.0.0.0，让局域网内其他设备也能用", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = lanShare, onCheckedChange = {
+                lanShare = it
+                SettingsStore.setLanShare(ctx, it)
+            })
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text("UDP 转发", style = MaterialTheme.typography.bodyLarge)
                 Text("通过 SSH 隧道转发 UDP 流量（QUIC/游戏语音）", style = MaterialTheme.typography.bodySmall)
             }
@@ -522,6 +571,31 @@ fun SettingsTab() {
                 udp = it
                 SettingsStore.setUdpEnabled(ctx, it)
             })
+        }
+        Spacer(Modifier.height(16.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(
+                value = socksPortStr,
+                onValueChange = {
+                    socksPortStr = it
+                    it.toIntOrNull()?.let { p -> SettingsStore.setSocksPort(ctx, p) }
+                },
+                label = { Text("SOCKS5 端口") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = httpPortStr,
+                onValueChange = {
+                    httpPortStr = it
+                    it.toIntOrNull()?.let { p -> SettingsStore.setHttpPort(ctx, p) }
+                },
+                label = { Text("HTTP 端口") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f)
+            )
         }
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()

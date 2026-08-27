@@ -21,6 +21,9 @@ pub struct ProxyConfig {
     pub inactivity_timeout: Option<Duration>,
     pub dns_server: String, // 远程解析器 host，默认 "8.8.8.8"
     pub udp_enabled: bool,
+    pub bind_addr: String, // SOCKS5/HTTP 监听地址，默认 "127.0.0.1"；LAN 共享用 "0.0.0.0"
+    pub socks_port: u16,   // SOCKS5 监听端口，默认 1080
+    pub http_port: u16,    // HTTP 监听端口，默认 8888
 }
 
 impl Default for ProxyConfig {
@@ -35,6 +38,9 @@ impl Default for ProxyConfig {
             inactivity_timeout: Some(Duration::from_secs(30)),
             dns_server: "8.8.8.8".into(),
             udp_enabled: true,
+            bind_addr: "127.0.0.1".into(),
+            socks_port: 1080,
+            http_port: 8888,
         }
     }
 }

@@ -74,8 +74,10 @@ impl Proxy {
                 return Err(e);
             }
         };
-        let handle = start_socks5_server(ssh.clone(), "127.0.0.1:1080".parse()?);
-        let http_handle = crate::http::start_http_proxy(ssh.clone(), "127.0.0.1:8888".parse()?);
+        let socks_addr = format!("{}:{}", self.config.bind_addr, self.config.socks_port);
+        let http_addr = format!("{}:{}", self.config.bind_addr, self.config.http_port);
+        let handle = start_socks5_server(ssh.clone(), socks_addr.parse()?);
+        let http_handle = crate::http::start_http_proxy(ssh.clone(), http_addr.parse()?);
         self.ssh = Some(ssh);
         self.socks_handle = Some(handle);
         self.http_handle = Some(http_handle);

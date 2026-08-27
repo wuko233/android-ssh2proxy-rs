@@ -18,6 +18,7 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static TUN_STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
+static SOCKS_ADDR: Mutex<Option<String>> = Mutex::new(None);
 static ACTIVE_SSH: Mutex<Option<Arc<ssh2proxy_core::ssh::SshClient>>> = Mutex::new(None);
 static UDP_MGR: Mutex<Option<Arc<UdpRelayManager>>> = Mutex::new(None);
 static UDP_RESPONSE: Mutex<Option<mpsc::UnboundedReceiver<UdpResponse>>> = Mutex::new(None);
@@ -132,6 +133,10 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
         let mut dns = PROXY_DNS.lock().unwrap_or_else(|e| e.into_inner());
         *dns = Some(config.dns_server.clone());
     }
+    {
+        let mut slot = SOCKS_ADDR.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = Some(format!("127.0.0.1:{}", config.socks_port));
+    }
     let rt = match runtime() {
         Some(rt) => rt,
         None => return -2,
@@ -167,6 +172,9 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
         *slot = Some(Arc::new(TrafficStats::default()));
     }
     log::info!("UDP: {}", if config.udp_enabled { "enabled" } else { "disabled" });
+    let bind_addr = config.bind_addr.clone();
+    let socks_port = config.socks_port;
+    let http_port = config.http_port;
     let mut proxy = Proxy::new(config, tx, udp);
     match rt.block_on(proxy.connect()) {
         Ok(()) => {
@@ -196,8 +204,8 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
             rt.spawn(async move { let _ = proxy.run_reconnect_loop().await; });
             let mut slot = STOP.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(stop);
-            log::info!("Socks5 server on 127.0.0.1:1080");
-            log::info!("HTTP proxy on 127.0.0.1:8888");
+            log::info!("Socks5 server on {}:{}", bind_addr, socks_port);
+            log::info!("HTTP proxy on {}:{}", bind_addr, http_port);
             0
         }
         Err(e) => {
@@ -218,10 +226,15 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runLatencyTest(
         .unwrap_or_else(|e| e.into_inner())
         .clone()
         .unwrap_or_else(|| "8.8.8.8".to_string());
+    let socks_addr = SOCKS_ADDR
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| "127.0.0.1:1080".to_string());
     let result = match (runtime(), ssh) {
         (Some(rt), Some(ssh)) => rt.block_on(ssh2proxy_core::probe::measure_latency(
             &ssh,
-            &ssh2proxy_core::socks5::Socks5Dialer { addr: "127.0.0.1:1080".parse().unwrap() },
+            &ssh2proxy_core::socks5::Socks5Dialer { addr: socks_addr.parse().unwrap() },
             &dns,
         )),
         (_, None) => ssh2proxy_core::probe::LatencyResult {
@@ -275,7 +288,13 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_setTunFd(
             }
         };
         let socks = ssh2proxy_core::socks5::Socks5Dialer {
-            addr: "127.0.0.1:1080".parse().unwrap(),
+            addr: SOCKS_ADDR
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+                .unwrap_or_else(|| "127.0.0.1:1080".to_string())
+                .parse()
+                .unwrap(),
         };
         let udp = UDP_MGR
             .lock()
@@ -379,7 +398,13 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runConnectivityTe
         .clone()
         .unwrap_or_else(|| "8.8.8.8".to_string());
     let dialer = ssh2proxy_core::socks5::Socks5Dialer {
-        addr: "127.0.0.1:1080".parse().unwrap(),
+        addr: SOCKS_ADDR
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+            .unwrap_or_else(|| "127.0.0.1:1080".to_string())
+            .parse()
+            .unwrap(),
     };
     let result = rt.block_on(ssh2proxy_core::probe::connectivity_test(&dialer, &dns, &domain));
     let json = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
