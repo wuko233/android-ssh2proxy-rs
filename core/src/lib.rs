@@ -1,5 +1,6 @@
 pub mod dns;
 pub mod dataplane;
+pub mod http;
 pub mod packet;
 pub mod probe;
 pub mod stats;
@@ -34,6 +35,7 @@ pub struct Proxy {
     config: ProxyConfig,
     ssh: Option<Arc<SshClient>>,
     socks_handle: Option<tokio::task::JoinHandle<()>>,
+    http_handle: Option<tokio::task::JoinHandle<()>>,
     udp: Option<Arc<UdpRelayManager>>,
     state: ProxyState,
     tx: mpsc::UnboundedSender<StateEvent>,
@@ -50,6 +52,7 @@ impl Proxy {
             config,
             ssh: None,
             socks_handle: None,
+            http_handle: None,
             udp,
             state: ProxyState::Disconnected,
             tx,
@@ -72,8 +75,10 @@ impl Proxy {
             }
         };
         let handle = start_socks5_server(ssh.clone(), "127.0.0.1:1080".parse()?);
+        let http_handle = crate::http::start_http_proxy(ssh.clone(), "127.0.0.1:8888".parse()?);
         self.ssh = Some(ssh);
         self.socks_handle = Some(handle);
+        self.http_handle = Some(http_handle);
         self.setup_udp().await;
         self.set_state(ProxyState::Connected);
         Ok(())
@@ -108,6 +113,9 @@ impl Proxy {
             ssh.disconnect().await;
         }
         if let Some(h) = self.socks_handle.take() {
+            h.abort();
+        }
+        if let Some(h) = self.http_handle.take() {
             h.abort();
         }
     }

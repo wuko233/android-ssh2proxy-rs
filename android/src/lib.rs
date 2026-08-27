@@ -197,6 +197,7 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
             let mut slot = STOP.lock().unwrap_or_else(|e| e.into_inner());
             *slot = Some(stop);
             log::info!("Socks5 server on 127.0.0.1:1080");
+            log::info!("HTTP proxy on 127.0.0.1:8888");
             0
         }
         Err(e) => {

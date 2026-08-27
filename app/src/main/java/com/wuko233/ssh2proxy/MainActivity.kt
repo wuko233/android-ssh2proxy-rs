@@ -68,6 +68,7 @@ fun App() {
         var trafficUp by remember { mutableStateOf(0L) }
         var trafficDown by remember { mutableStateOf(0L) }
         var logLines by remember { mutableStateOf(listOf<String>()) }
+        var localMode by remember { mutableStateOf(false) }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
         val sdf = remember { SimpleDateFormat("HH:mm", Locale.US) }
@@ -89,7 +90,7 @@ fun App() {
                     }
                 } catch (_: Exception) {
                 }
-                delay(400)
+                delay(1000)
             }
         }
 
@@ -129,9 +130,16 @@ fun App() {
                 .put("dns_server", p.dnsServer)
                 .put("udp_enabled", SettingsStore.udpEnabled(ctx)).toString()
             if (NativeBridge.connect(cfg) == 0) {
-                ctx.startService(Intent(ctx, SshVpnService::class.java))
-                connected = true
-                status = ""
+                if (SettingsStore.localProxyMode(ctx)) {
+                    localMode = true
+                    connected = true
+                    status = ""
+                } else {
+                    localMode = false
+                    ctx.startService(Intent(ctx, SshVpnService::class.java))
+                    connected = true
+                    status = ""
+                }
                 runLatencyProbe()
             } else {
                 status = "连接失败（请检查主机/端口/账号）"
@@ -162,6 +170,7 @@ fun App() {
             NativeBridge.closeTun()
             ctx.stopService(Intent(ctx, SshVpnService::class.java))
             connected = false
+            localMode = false
             status = "已断开"
             testResult = null
         }
@@ -226,23 +235,40 @@ fun App() {
                     0 -> {
                         Column(Modifier.fillMaxSize().padding(16.dp)) {
                             if (connected) {
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    shape = RoundedCornerShape(12.dp),
-                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-                                ) {
-                                    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                        Text("已连接", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                                        Spacer(Modifier.height(12.dp))
-                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                            Column(Modifier.weight(1f)) {
-                                                Text("上传", style = MaterialTheme.typography.bodySmall)
-                                                Text(formatBytes(trafficUp), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
-                                            }
-                                            VerticalDivider(Modifier.height(40.dp))
-                                            Column(Modifier.weight(1f)) {
-                                                Text("下载", style = MaterialTheme.typography.bodySmall)
-                                                Text(formatBytes(trafficDown), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                if (localMode) {
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                    ) {
+                                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                            Text("本地代理已启动", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Spacer(Modifier.height(8.dp))
+                                            Text("SOCKS5: 127.0.0.1:1080", style = MaterialTheme.typography.bodyMedium)
+                                            Text("HTTP:   127.0.0.1:8888", style = MaterialTheme.typography.bodyMedium)
+                                            Spacer(Modifier.height(8.dp))
+                                            Text("其他 App 请把代理地址设为上面任意一个", style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+                                } else {
+                                    Card(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                                    ) {
+                                        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                                            Text("已连接", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Spacer(Modifier.height(12.dp))
+                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                Column(Modifier.weight(1f)) {
+                                                    Text("上传", style = MaterialTheme.typography.bodySmall)
+                                                    Text(formatBytes(trafficUp), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                                }
+                                                VerticalDivider(Modifier.height(40.dp))
+                                                Column(Modifier.weight(1f)) {
+                                                    Text("下载", style = MaterialTheme.typography.bodySmall)
+                                                    Text(formatBytes(trafficDown), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
+                                                }
                                             }
                                         }
                                     }
@@ -296,21 +322,21 @@ fun App() {
 
                             if (connected) {
                                 Spacer(Modifier.height(8.dp))
-                                Button(
-                                    onClick = { runTest() },
-                                    enabled = !testing,
-                                    modifier = Modifier.fillMaxWidth().height(44.dp)
-                                ) {
-                                    Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
-                                }
-
-                                Spacer(Modifier.height(8.dp))
-                                OutlinedButton(
-                                    onClick = { runLatencyProbe() },
-                                    enabled = !latencyTesting,
-                                    modifier = Modifier.fillMaxWidth().height(44.dp)
-                                ) {
-                                    Text(if (latencyTesting) "延迟测试中…" else "测试延迟", fontWeight = FontWeight.Medium)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = { runTest() },
+                                        enabled = !testing,
+                                        modifier = Modifier.weight(1f).height(44.dp)
+                                    ) {
+                                        Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
+                                    }
+                                    OutlinedButton(
+                                        onClick = { runLatencyProbe() },
+                                        enabled = !latencyTesting,
+                                        modifier = Modifier.weight(1f).height(44.dp)
+                                    ) {
+                                        Text(if (latencyTesting) "延迟测试中…" else "测试延迟", fontWeight = FontWeight.Medium)
+                                    }
                                 }
                             }
 
@@ -470,11 +496,23 @@ fun SettingsTab() {
     val ctx = LocalContext.current
     var udp by remember { mutableStateOf(SettingsStore.udpEnabled(ctx)) }
     var logDebug by remember { mutableStateOf(SettingsStore.logDebug(ctx)) }
+    var localProxy by remember { mutableStateOf(SettingsStore.localProxyMode(ctx)) }
     var cleared by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("网络", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("仅本地代理", style = MaterialTheme.typography.bodyLarge)
+                Text("连接后只开放本地 SOCKS5/HTTP 代理，不建立 VPN", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = localProxy, onCheckedChange = {
+                localProxy = it
+                SettingsStore.setLocalProxyMode(ctx, it)
+            })
+        }
+        Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("UDP 转发", style = MaterialTheme.typography.bodyLarge)
