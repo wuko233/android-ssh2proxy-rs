@@ -23,7 +23,7 @@ impl client::Handler for Handler {
         // TOFU：v1 默认接受，指纹展示在 UI 层（P3）；此处至少记录指纹。
         let key = server_public_key.public_key();
         log::info!(
-            "server host key fingerprint (SHA256): {}",
+            "Fingerprint: {}",
             key.fingerprint(russh::keys::HashAlg::Sha256)
         );
         Ok(true)
@@ -45,6 +45,7 @@ impl SshClient {
 
         let user = config.username.clone();
         let auth = config.auth.clone();
+        log::info!("Authenticating...");
         let ok = match auth {
             Auth::Password { password: pw } => handle
                 .authenticate_password(user, pw)
@@ -65,6 +66,7 @@ impl SshClient {
         if !ok {
             anyhow::bail!("authentication rejected");
         }
+        log::info!("Authenticated");
 
         Ok(Self {
             handle: Mutex::new(handle),

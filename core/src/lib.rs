@@ -92,9 +92,9 @@ impl Proxy {
         match ssh.open_session_exec(&crate::udp::relay_command()).await {
             Ok(stream) => {
                 mgr.replace(stream);
-                log::info!("udp relay (re)established");
+                log::info!("UDP relay established");
             }
-            Err(e) => log::warn!("udp relay setup failed (UDP disabled): {e}"),
+            Err(e) => log::warn!("UDP disabled: {e}"),
         }
     }
 
@@ -129,7 +129,7 @@ impl Proxy {
                     return Ok(());
                 }
                 _ = drop_rx.recv() => {
-                    log::warn!("ssh session dropped; reconnecting");
+                    log::warn!("SSH disconnected, reconnecting");
                     self.teardown().await;
                     self.set_state(ProxyState::Reconnecting);
                 }
@@ -146,7 +146,7 @@ impl Proxy {
                 Ok(()) => return true,
                 Err(e) => {
                     self.set_state(ProxyState::Reconnecting);
-                    log::warn!("ssh connect failed (attempt {attempt}): {e:#}");
+                    log::warn!("Reconnect attempt {attempt} failed: {e:#}");
                     tokio::select! {
                         _ = self.stop.notified() => return false,
                         _ = tokio::time::sleep(backoff_delay(attempt)) => {}
