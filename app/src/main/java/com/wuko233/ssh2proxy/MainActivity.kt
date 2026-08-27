@@ -12,8 +12,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,8 +30,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -42,6 +50,7 @@ fun App() {
     MaterialTheme(colorScheme = lightColorScheme()) {
         val ctx = LocalContext.current
         val scope = rememberCoroutineScope()
+        var tab by remember { mutableStateOf(0) }
         var profiles by remember { mutableStateOf(ProfileStore.load(ctx)) }
         var selectedId by remember { mutableStateOf(profiles.firstOrNull()?.id) }
         var connected by remember { mutableStateOf(false) }
@@ -108,86 +117,127 @@ fun App() {
         }
 
         Scaffold(
-            topBar = { TopAppBar(title = { Text("SSH2Proxy", fontWeight = FontWeight.Bold) }) },
-            floatingActionButton = {
-                FloatingActionButton(onClick = { showAdd = true }) { Text("＋", style = MaterialTheme.typography.titleLarge) }
-            }
-        ) { padding ->
-            Column(Modifier.padding(padding).fillMaxSize().padding(16.dp)) {
-                if (status.isNotEmpty()) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (connected) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    ) {
+            topBar = {
+                TopAppBar(
+                    title = {
                         Text(
-                            "状态：$status",
-                            modifier = Modifier.padding(12.dp),
-                            fontWeight = FontWeight.Medium
+                            when (tab) {
+                                0 -> "SSH2Proxy"
+                                1 -> "运行日志"
+                                else -> "设置"
+                            },
+                            fontWeight = FontWeight.Bold
                         )
                     }
-                    Spacer(Modifier.height(12.dp))
+                )
+            },
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        icon = { Icon(Icons.Filled.Home, contentDescription = "主页") },
+                        label = { Text("主页") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        icon = { Icon(Icons.Filled.List, contentDescription = "日志") },
+                        label = { Text("日志") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 2,
+                        onClick = { tab = 2 },
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = "设置") },
+                        label = { Text("设置") }
+                    )
                 }
-
-                if (profiles.isEmpty()) {
-                    Box(Modifier.weight(0.6f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("还没有 SSH 配置\n点右下角 ＋ 添加", style = MaterialTheme.typography.bodyLarge)
-                    }
-                } else {
-                    LazyColumn(Modifier.weight(0.6f)) {
-                        items(profiles, key = { it.id }) { p ->
-                            ProfileCard(
-                                profile = p,
-                                selected = p.id == selectedId,
-                                onClick = { selectedId = p.id; status = "" },
-                                onEdit = { editing = p },
-                                onDelete = {
-                                    profiles = profiles.filter { it.id != p.id }
-                                    ProfileStore.save(ctx, profiles)
-                                    if (selectedId == p.id) selectedId = profiles.firstOrNull()?.id
+            },
+            floatingActionButton = {
+                if (tab == 0) {
+                    FloatingActionButton(onClick = { showAdd = true }) { Text("＋", style = MaterialTheme.typography.titleLarge) }
+                }
+            }
+        ) { padding ->
+            Box(Modifier.padding(padding).fillMaxSize()) {
+                when (tab) {
+                    0 -> {
+                        Column(Modifier.fillMaxSize().padding(16.dp)) {
+                            if (status.isNotEmpty()) {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (connected) MaterialTheme.colorScheme.primaryContainer
+                                    else MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(
+                                        "状态：$status",
+                                        modifier = Modifier.padding(12.dp),
+                                        fontWeight = FontWeight.Medium
+                                    )
                                 }
-                            )
+                                Spacer(Modifier.height(12.dp))
+                            }
+
+                            if (profiles.isEmpty()) {
+                                Box(Modifier.weight(0.7f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Text("还没有 SSH 配置\n点右下角 ＋ 添加", style = MaterialTheme.typography.bodyLarge)
+                                }
+                            } else {
+                                LazyColumn(Modifier.weight(0.7f)) {
+                                    items(profiles, key = { it.id }) { p ->
+                                        ProfileCard(
+                                            profile = p,
+                                            selected = p.id == selectedId,
+                                            onClick = { selectedId = p.id; status = "" },
+                                            onEdit = { editing = p },
+                                            onDelete = {
+                                                profiles = profiles.filter { it.id != p.id }
+                                                ProfileStore.save(ctx, profiles)
+                                                if (selectedId == p.id) selectedId = profiles.firstOrNull()?.id
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = { if (connected) disconnect() else connect() },
+                                enabled = connected || selected != null,
+                                modifier = Modifier.fillMaxWidth().height(48.dp)
+                            ) {
+                                Text(if (connected) "断开连接" else "连接", fontWeight = FontWeight.Bold)
+                            }
+
+                            if (connected) {
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = { runTest() },
+                                    enabled = !testing,
+                                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                                ) {
+                                    Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
+                                }
+                            }
+
+                            testResult?.let {
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.secondaryContainer
+                                    ) {
+                                        Text(it, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
                         }
                     }
+                    1 -> LogTab()
+                    else -> SettingsTab()
                 }
-
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = { if (connected) disconnect() else connect() },
-                    enabled = connected || selected != null,
-                    modifier = Modifier.fillMaxWidth().height(48.dp)
-                ) {
-                    Text(if (connected) "断开连接" else "连接", fontWeight = FontWeight.Bold)
-                }
-
-                if (connected) {
-                    Spacer(Modifier.height(8.dp))
-                    Button(
-                        onClick = { runTest() },
-                        enabled = !testing,
-                        modifier = Modifier.fillMaxWidth().height(44.dp)
-                    ) {
-                        Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
-                    }
-                }
-
-                testResult?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer
-                    ) {
-                        Text(it, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { ctx.startActivity(Intent(ctx, LogActivity::class.java)) },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("查看日志") }
             }
         }
 
@@ -240,6 +290,82 @@ fun formatProbeResult(json: String?): String {
         }
     } catch (_: Exception) {
         "测试失败: $json"
+    }
+}
+
+@Composable
+fun LogTab() {
+    var lines by remember { mutableStateOf(listOf<String>()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            try {
+                val json = NativeBridge.pollEvents()
+                if (!json.isNullOrEmpty() && json != "[]") {
+                    val arr = JSONArray(json)
+                    val new = (0 until arr.length()).map { arr.getString(it) }
+                    if (new.isNotEmpty()) {
+                        lines = (lines + new).takeLast(1000)
+                    }
+                }
+            } catch (_: Exception) {
+            }
+            delay(400)
+        }
+    }
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
+    }
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            TextButton(onClick = { lines = emptyList() }) { Text("清空") }
+        }
+        if (lines.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("暂无日志", style = MaterialTheme.typography.bodyLarge)
+            }
+        } else {
+            SelectionContainer {
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    items(lines) { line ->
+                        Text(
+                            line,
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsTab() {
+    val ctx = LocalContext.current
+    var cleared by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Text("关于", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Text("SSH2Proxy v0.1.0")
+        Text("基于 Rust 的 SSH 全局代理")
+        Spacer(Modifier.height(24.dp))
+        OutlinedButton(onClick = {
+            ProfileStore.save(ctx, emptyList())
+            cleared = true
+        }) {
+            Text("清除所有配置")
+        }
+        if (cleared) {
+            Spacer(Modifier.height(8.dp))
+            Text("已清除，请回到主页重新添加")
+        }
     }
 }
 
