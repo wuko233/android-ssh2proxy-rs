@@ -1,10 +1,11 @@
 pub mod dns;
+pub mod dataplane;
 pub mod packet;
+pub mod probe;
 pub mod tcpflow;
 pub mod socks5;
 pub mod ssh;
 pub mod state;
-pub mod dataplane;
 pub use state::{Auth, ProxyConfig, ProxyState, StateEvent};
 
 use std::sync::Arc;

@@ -9,4 +9,6 @@ object NativeBridge {
     external fun closeTun()
     external fun disconnect()
     external fun getStats(): String
+    external fun pollEvents(): String
+    external fun runConnectivityTest(domain: String): String
 }

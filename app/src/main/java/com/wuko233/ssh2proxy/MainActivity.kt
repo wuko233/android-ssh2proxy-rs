@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -23,6 +24,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
@@ -38,14 +44,35 @@ class MainActivity : ComponentActivity() {
 fun App() {
     MaterialTheme(colorScheme = lightColorScheme()) {
         val ctx = LocalContext.current
+        val scope = rememberCoroutineScope()
         var profiles by remember { mutableStateOf(ProfileStore.load(ctx)) }
         var selectedId by remember { mutableStateOf(profiles.firstOrNull()?.id) }
         var connected by remember { mutableStateOf(false) }
         var status by remember { mutableStateOf("") }
         var editing by remember { mutableStateOf<Profile?>(null) }
         var showAdd by remember { mutableStateOf(false) }
+        var logLines by remember { mutableStateOf(listOf<String>()) }
+        var testResult by remember { mutableStateOf<String?>(null) }
+        var testing by remember { mutableStateOf(false) }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
+
+        LaunchedEffect(Unit) {
+            while (true) {
+                try {
+                    val json = NativeBridge.pollEvents()
+                    if (!json.isNullOrEmpty() && json != "[]") {
+                        val arr = JSONArray(json)
+                        val new = (0 until arr.length()).map { arr.getString(it) }
+                        if (new.isNotEmpty()) {
+                            logLines = (logLines + new).takeLast(500)
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+                delay(500)
+            }
+        }
 
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
@@ -86,6 +113,19 @@ fun App() {
             ctx.stopService(Intent(ctx, SshVpnService::class.java))
             connected = false
             status = "已断开"
+            testResult = null
+        }
+
+        fun runTest() {
+            scope.launch {
+                testing = true
+                testResult = null
+                val json = withContext(Dispatchers.IO) {
+                    NativeBridge.runConnectivityTest("www.baidu.com")
+                }
+                testResult = formatProbeResult(json)
+                testing = false
+            }
         }
 
         Scaffold(
@@ -112,11 +152,11 @@ fun App() {
                 }
 
                 if (profiles.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.weight(0.6f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text("还没有 SSH 配置\n点右下角 ＋ 添加", style = MaterialTheme.typography.bodyLarge)
                     }
                 } else {
-                    LazyColumn(Modifier.weight(1f)) {
+                    LazyColumn(Modifier.weight(0.6f)) {
                         items(profiles, key = { it.id }) { p ->
                             ProfileCard(
                                 profile = p,
@@ -133,14 +173,39 @@ fun App() {
                     }
                 }
 
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = { if (connected) disconnect() else connect() },
                     enabled = connected || selected != null,
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                    modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
                     Text(if (connected) "断开连接" else "连接", fontWeight = FontWeight.Bold)
                 }
+
+                if (connected) {
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = { runTest() },
+                        enabled = !testing,
+                        modifier = Modifier.fillMaxWidth().height(44.dp)
+                    ) {
+                        Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
+                    }
+                }
+
+                testResult?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer
+                    ) {
+                        Text(it, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                LogView(logLines)
             }
         }
 
@@ -171,6 +236,57 @@ fun App() {
     }
 }
 
+fun formatProbeResult(json: String?): String {
+    if (json.isNullOrEmpty()) return "测试失败（无响应）"
+    return try {
+        val o = JSONObject(json)
+        val dnsOk = o.optBoolean("dns_ok")
+        val ips = o.optJSONArray("resolved_ips")
+        val ipsStr = if (ips != null && ips.length() > 0) {
+            (0 until ips.length()).joinToString(", ") { ips.getString(it) }
+        } else "无"
+        val tcpOk = o.optBoolean("tcp_connect_ok")
+        val err = o.optString("error")
+        buildString {
+            append("域名: ").append(o.optString("domain")).append('\n')
+            append("DNS 解析: ").append(if (dnsOk) "✓ 成功" else "✗ 失败").append('\n')
+            append("解析 IP: ").append(ipsStr).append('\n')
+            append("TCP 连通(443): ").append(if (tcpOk) "✓ 成功" else "✗ 失败")
+            if (err.isNotEmpty()) append('\n').append("错误: ").append(err)
+        }
+    } catch (_: Exception) {
+        "测试失败: $json"
+    }
+}
+
+@Composable
+fun LogView(lines: List<String>) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.scrollToItem(lines.size - 1)
+    }
+    Card(Modifier.fillMaxWidth().height(180.dp)) {
+        Column {
+            Text("运行日志", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), fontWeight = FontWeight.Bold)
+            if (lines.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("暂无日志", style = MaterialTheme.typography.bodySmall)
+                }
+            } else {
+                LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                    items(lines) { line ->
+                        Text(
+                            line,
+                            Modifier.padding(horizontal = 12.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ProfileCard(profile: Profile, selected: Boolean, onClick: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Card(
@@ -190,6 +306,7 @@ fun ProfileCard(profile: Profile, selected: Boolean, onClick: () -> Unit, onEdit
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                Text("DNS: ${profile.dnsServer}", style = MaterialTheme.typography.bodySmall)
             }
             TextButton(onClick = onEdit) { Text("编辑") }
             TextButton(onClick = onDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
