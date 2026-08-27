@@ -50,7 +50,8 @@ fun App() {
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
             val cfg = JSONObject().put("host", p.host).put("port", p.port)
-                .put("username", p.username).put("auth", auth).toString()
+                .put("username", p.username).put("auth", auth)
+                .put("dns_server", p.dnsServer).toString()
             if (NativeBridge.connect(cfg) == 0) {
                 ctx.startService(Intent(ctx, SshVpnService::class.java))
                 connected = true
@@ -81,6 +82,7 @@ fun App() {
 
         fun disconnect() {
             NativeBridge.disconnect()
+            NativeBridge.closeTun()
             ctx.stopService(Intent(ctx, SshVpnService::class.java))
             connected = false
             status = "已断开"
@@ -201,6 +203,7 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
     var port by remember { mutableStateOf(existing?.port?.toString() ?: "22") }
     var username by remember { mutableStateOf(existing?.username ?: "root") }
     var password by remember { mutableStateOf(existing?.password ?: "") }
+    var dnsServer by remember { mutableStateOf(existing?.dnsServer ?: "8.8.8.8") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -219,6 +222,10 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation()
                 )
+                OutlinedTextField(
+                    value = dnsServer, onValueChange = { dnsServer = it }, label = { Text("DNS 服务器（国内建议 223.5.5.5）") },
+                    singleLine = true
+                )
             }
         },
         confirmButton = {
@@ -229,6 +236,7 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
                     port = port.toIntOrNull() ?: 22,
                     username = username.trim(),
                     password = password,
+                    dnsServer = dnsServer.trim().ifEmpty { "8.8.8.8" },
                 )
                 onSave(p)
             }) { Text("保存") }

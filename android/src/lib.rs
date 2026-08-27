@@ -11,6 +11,7 @@ use ssh2proxy_core::{Proxy, ProxyConfig};
 
 static RT: OnceLock<Runtime> = OnceLock::new();
 static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
+static TUN_STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
 
 fn runtime() -> Option<&'static Runtime> {
@@ -27,6 +28,11 @@ fn runtime() -> Option<&'static Runtime> {
 
 #[no_mangle]
 pub extern "system" fn JNI_OnLoad(_vm: jni::JavaVM, _reserved: *mut std::ffi::c_void) -> jint {
+    android_logger::init_once(
+        android_logger::Config::default()
+            .with_max_level(log::LevelFilter::Debug)
+            .with_tag("ssh2proxy"),
+    );
     jni::sys::JNI_VERSION_1_6
 }
 
@@ -93,10 +99,26 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_setTunFd(
             addr: "127.0.0.1:1080".parse().unwrap(),
         };
         let mut dp = ssh2proxy_core::dataplane::DataPlane::new(device, socks, dns);
+        {
+            let mut slot = TUN_STOP.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = Some(dp.stop_handle());
+        }
         if let Err(e) = dp.run().await {
             log::error!("dataplane exited: {e}");
         }
+        log::info!("dataplane stopped");
     });
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_closeTun(
+    _env: JNIEnv,
+    _class: JClass,
+) {
+    let stop = TUN_STOP.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(stop) = stop {
+        stop.notify_one();
+    }
 }
 
 #[no_mangle]

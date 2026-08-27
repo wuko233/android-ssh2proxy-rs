@@ -6,6 +6,7 @@ object NativeBridge {
     }
     external fun connect(configJson: String): Int
     external fun setTunFd(fd: Int)
+    external fun closeTun()
     external fun disconnect()
     external fun getStats(): String
 }

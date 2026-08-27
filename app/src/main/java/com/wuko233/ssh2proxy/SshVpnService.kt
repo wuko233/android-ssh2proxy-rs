@@ -17,6 +17,11 @@ class SshVpnService : VpnService() {
         return START_STICKY
     }
 
+    override fun onDestroy() {
+        NativeBridge.closeTun()
+        super.onDestroy()
+    }
+
     private fun establish(): ParcelFileDescriptor? {
         return Builder()
             .setMtu(1500)

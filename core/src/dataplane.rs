@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 
 use crate::dns;
 use crate::packet::{self, Ipv4Header};
@@ -32,12 +33,30 @@ pub struct DataPlane<T> {
     flows: HashMap<FlowKey, FlowHandle>,
     r2c_tx: mpsc::UnboundedSender<(FlowKey, UpstreamMsg)>,
     r2c_rx: mpsc::UnboundedReceiver<(FlowKey, UpstreamMsg)>,
+    dns_tx: mpsc::UnboundedSender<Vec<u8>>,
+    dns_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    stop: Arc<Notify>,
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
     pub fn new(tun: T, socks: Socks5Dialer, dns_server: String) -> Self {
         let (r2c_tx, r2c_rx) = mpsc::unbounded_channel();
-        Self { tun, socks, dns_server, flows: HashMap::new(), r2c_tx, r2c_rx }
+        let (dns_tx, dns_rx) = mpsc::unbounded_channel();
+        Self {
+            tun,
+            socks,
+            dns_server,
+            flows: HashMap::new(),
+            r2c_tx,
+            r2c_rx,
+            dns_tx,
+            dns_rx,
+            stop: Arc::new(Notify::new()),
+        }
+    }
+
+    pub fn stop_handle(&self) -> Arc<Notify> {
+        self.stop.clone()
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
@@ -55,6 +74,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
                         Some((key, msg)) => self.handle_upstream(key, msg).await,
                         None => break,
                     }
+                }
+                pkt = self.dns_rx.recv() => {
+                    match pkt {
+                        Some(pkt) => { let _ = self.tun.write_all(&pkt).await; }
+                        None => break,
+                    }
+                }
+                _ = self.stop.notified() => {
+                    log::info!("dataplane stop requested");
+                    break;
                 }
             }
         }
@@ -77,6 +106,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
             if !tcp.flags.syn {
                 return;
             }
+            log::debug!("new tcp flow {} -> {}:{}", ip_to_str(&key.src_ip), ip_to_str(&key.dst_ip), key.dst_port);
             let h = self.spawn_flow(key, tcp.seq);
             self.flows.insert(key, h);
         }
@@ -103,7 +133,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
             let _ = start_rx.await;
             let mut s = match socks.connect(&ip_to_str(&dst_ip), dst_port).await {
                 Ok(s) => s,
-                Err(_) => { let _ = r2c_tx.send((key, UpstreamMsg::ConnectFailed)); return; }
+                Err(e) => { log::warn!("dial {}:{} failed: {e}", ip_to_str(&dst_ip), dst_port); let _ = r2c_tx.send((key, UpstreamMsg::ConnectFailed)); return; }
             };
             let mut b = [0u8; 32768];
             loop {
@@ -130,15 +160,27 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send> DataPlane<T> {
     async fn handle_udp(&mut self, iph: &Ipv4Header, seg: &[u8]) {
         let Some(udp) = packet::parse_udp(seg) else { return };
         if udp.dst_port != 53 { return; }
+        log::debug!("dns query from {:?}:{} ({} bytes)", iph.src, udp.src_port, udp.payload.len());
         let socks = self.socks.clone();
-        let answer = dns::resolve(
-            |h, p| async move { socks.connect(&h, p).await },
-            &self.dns_server,
-            udp.payload,
-        ).await.unwrap_or_default();
+        let dns_server = self.dns_server.clone();
+        let query = udp.payload.to_vec();
         let resp_iph = Ipv4Header { src: iph.dst, dst: iph.src, protocol: packet::IPV4_PROTO_UDP, total_len: 0 };
-        let pkt = packet::build_udp_packet(&resp_iph, udp.dst_port, udp.src_port, &answer);
-        let _ = self.tun.write_all(&pkt).await;
+        let src_port = udp.dst_port;
+        let dst_port = udp.src_port;
+        let dns_tx = self.dns_tx.clone();
+        tokio::spawn(async move {
+            let answer = tokio::time::timeout(
+                Duration::from_secs(10),
+                dns::resolve(|h, p| async move { socks.connect(&h, p).await }, &dns_server, &query),
+            )
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .unwrap_or_default();
+            log::debug!("dns resolved {} bytes", answer.len());
+            let pkt = packet::build_udp_packet(&resp_iph, src_port, dst_port, &answer);
+            let _ = dns_tx.send(pkt);
+        });
     }
 
     async fn handle_upstream(&mut self, key: FlowKey, msg: UpstreamMsg) {
