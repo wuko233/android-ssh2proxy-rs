@@ -15,6 +15,71 @@ pub struct ProbeResult {
     pub error: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LatencyResult {
+    pub ssh_ok: bool,
+    pub ssh_latency_ms: Option<u64>,
+    pub ssh_error: Option<String>,
+    pub proxy_ok: bool,
+    pub proxy_latency_ms: Option<u64>,
+    pub proxy_error: Option<String>,
+}
+
+impl LatencyResult {
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        let message = message.into();
+        Self {
+            ssh_ok: false,
+            ssh_latency_ms: None,
+            ssh_error: Some(message.clone()),
+            proxy_ok: false,
+            proxy_latency_ms: None,
+            proxy_error: Some(message),
+        }
+    }
+}
+
+pub async fn measure_latency(
+    ssh: &crate::ssh::SshClient,
+    dialer: &Socks5Dialer,
+    dns_server: &str,
+) -> LatencyResult {
+    let mut result = LatencyResult {
+        ssh_ok: false,
+        ssh_latency_ms: None,
+        ssh_error: None,
+        proxy_ok: false,
+        proxy_latency_ms: None,
+        proxy_error: None,
+    };
+
+    let started = std::time::Instant::now();
+    match tokio::time::timeout(Duration::from_secs(10), ssh.ping()).await {
+        Ok(Ok(())) => {
+            result.ssh_ok = true;
+            result.ssh_latency_ms = Some(started.elapsed().as_millis() as u64);
+        }
+        Ok(Err(e)) => result.ssh_error = Some(e.to_string()),
+        Err(_) => result.ssh_error = Some("timeout".into()),
+    }
+
+    if !result.ssh_ok {
+        result.proxy_error = Some("SSH unavailable".into());
+        return result;
+    }
+
+    let started = std::time::Instant::now();
+    match tokio::time::timeout(Duration::from_secs(10), dialer.connect(dns_server, 53)).await {
+        Ok(Ok(_stream)) => {
+            result.proxy_ok = true;
+            result.proxy_latency_ms = Some(started.elapsed().as_millis() as u64);
+        }
+        Ok(Err(e)) => result.proxy_error = Some(e.to_string()),
+        Err(_) => result.proxy_error = Some("timeout".into()),
+    }
+    result
+}
+
 pub fn build_a_query(domain: &str) -> Vec<u8> {
     let mut q = Vec::with_capacity(17 + domain.len());
     q.extend_from_slice(&[0x12, 0x34]); // id

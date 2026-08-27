@@ -18,6 +18,7 @@ static RT: OnceLock<Runtime> = OnceLock::new();
 static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static TUN_STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
+static ACTIVE_SSH: Mutex<Option<Arc<ssh2proxy_core::ssh::SshClient>>> = Mutex::new(None);
 static UDP_MGR: Mutex<Option<Arc<UdpRelayManager>>> = Mutex::new(None);
 static UDP_RESPONSE: Mutex<Option<mpsc::UnboundedReceiver<UdpResponse>>> = Mutex::new(None);
 static STATS: Mutex<Option<Arc<TrafficStats>>> = Mutex::new(None);
@@ -170,6 +171,10 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
     match rt.block_on(proxy.connect()) {
         Ok(()) => {
             let stop = proxy.stop_handle();
+            {
+                let mut slot = ACTIVE_SSH.lock().unwrap_or_else(|e| e.into_inner());
+                *slot = proxy.current_ssh();
+            }
             rt.spawn(async move {
                 while let Some(ev) = rx.recv().await {
                     match ev {
@@ -198,6 +203,47 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
             log::error!("Connect failed: {e}");
             -2
         }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runLatencyTest(
+    env: JNIEnv,
+    _class: JClass,
+) -> jstring {
+    let ssh = ACTIVE_SSH.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let dns = PROXY_DNS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .unwrap_or_else(|| "8.8.8.8".to_string());
+    let result = match (runtime(), ssh) {
+        (Some(rt), Some(ssh)) => rt.block_on(ssh2proxy_core::probe::measure_latency(
+            &ssh,
+            &ssh2proxy_core::socks5::Socks5Dialer { addr: "127.0.0.1:1080".parse().unwrap() },
+            &dns,
+        )),
+        (_, None) => ssh2proxy_core::probe::LatencyResult {
+            ssh_ok: false,
+            ssh_latency_ms: None,
+            ssh_error: Some("SSH unavailable".into()),
+            proxy_ok: false,
+            proxy_latency_ms: None,
+            proxy_error: Some("SSH unavailable".into()),
+        },
+        (None, Some(_)) => ssh2proxy_core::probe::LatencyResult {
+            ssh_ok: false,
+            ssh_latency_ms: None,
+            ssh_error: Some("runtime unavailable".into()),
+            proxy_ok: false,
+            proxy_latency_ms: None,
+            proxy_error: Some("runtime unavailable".into()),
+        },
+    };
+    let json = serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string());
+    match env.new_string(json) {
+        Ok(s) => s.into_raw(),
+        Err(_) => std::ptr::null_mut(),
     }
 }
 

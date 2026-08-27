@@ -111,6 +111,11 @@ impl SshClient {
     pub async fn is_closed(&self) -> bool {
         self.handle.lock().await.is_closed()
     }
+
+    pub async fn ping(&self) -> Result<()> {
+        let handle = self.handle.lock().await;
+        handle.send_ping().await.context("ssh ping failed")
+    }
 }
 
 #[cfg(test)]

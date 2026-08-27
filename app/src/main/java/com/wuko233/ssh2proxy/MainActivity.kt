@@ -17,8 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -63,6 +63,8 @@ fun App() {
         var showAdd by remember { mutableStateOf(false) }
         var testResult by remember { mutableStateOf<String?>(null) }
         var testing by remember { mutableStateOf(false) }
+        var latencyResult by remember { mutableStateOf<String?>(null) }
+        var latencyTesting by remember { mutableStateOf(false) }
         var trafficUp by remember { mutableStateOf(0L) }
         var trafficDown by remember { mutableStateOf(0L) }
         var logLines by remember { mutableStateOf(listOf<String>()) }
@@ -107,6 +109,19 @@ fun App() {
             }
         }
 
+        fun runLatencyProbe() {
+            if (latencyTesting) return
+            scope.launch {
+                latencyTesting = true
+                latencyResult = null
+                val json = withContext(Dispatchers.IO) {
+                    NativeBridge.runLatencyTest()
+                }
+                latencyResult = formatLatencyResult(json)
+                latencyTesting = false
+            }
+        }
+
         fun doConnect(p: Profile) {
             val auth = JSONObject().put("type", "password").put("password", p.password)
             val cfg = JSONObject().put("host", p.host).put("port", p.port)
@@ -117,6 +132,7 @@ fun App() {
                 ctx.startService(Intent(ctx, SshVpnService::class.java))
                 connected = true
                 status = ""
+                runLatencyProbe()
             } else {
                 status = "连接失败（请检查主机/端口/账号）"
             }
@@ -188,7 +204,7 @@ fun App() {
                     NavigationBarItem(
                         selected = tab == 1,
                         onClick = { tab = 1 },
-                        icon = { Icon(Icons.Filled.List, contentDescription = "日志") },
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "日志") },
                         label = { Text("日志") }
                     )
                     NavigationBarItem(
@@ -287,6 +303,15 @@ fun App() {
                                 ) {
                                     Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
                                 }
+
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = { runLatencyProbe() },
+                                    enabled = !latencyTesting,
+                                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                                ) {
+                                    Text(if (latencyTesting) "延迟测试中…" else "测试延迟", fontWeight = FontWeight.Medium)
+                                }
                             }
 
                             testResult?.let {
@@ -298,6 +323,19 @@ fun App() {
                                         color = MaterialTheme.colorScheme.secondaryContainer
                                     ) {
                                         Text(it, modifier = Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+                                    }
+                                }
+                            }
+
+                            latencyResult?.let {
+                                Spacer(Modifier.height(8.dp))
+                                SelectionContainer {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = MaterialTheme.colorScheme.tertiaryContainer
+                                    ) {
+                                        Text(it, modifier = Modifier.padding(14.dp), style = MaterialTheme.typography.bodyMedium)
                                     }
                                 }
                             }
@@ -358,6 +396,26 @@ fun formatProbeResult(json: String?): String {
         }
     } catch (_: Exception) {
         "测试失败: $json"
+    }
+}
+
+fun formatLatencyResult(json: String?): String {
+    if (json.isNullOrEmpty()) return "延迟测试失败（无响应）"
+    return try {
+        val o = JSONObject(json)
+        val sshText = if (o.optBoolean("ssh_ok")) {
+            "${o.optLong("ssh_latency_ms")} ms"
+        } else {
+            "失败：${o.optString("ssh_error", "未知错误")}"
+        }
+        val proxyText = if (o.optBoolean("proxy_ok")) {
+            "${o.optLong("proxy_latency_ms")} ms"
+        } else {
+            "失败：${o.optString("proxy_error", "未知错误")}"
+        }
+        "延迟测试\nSSH 服务器：$sshText\n代理出口：$proxyText"
+    } catch (_: Exception) {
+        "延迟测试失败：$json"
     }
 }
 

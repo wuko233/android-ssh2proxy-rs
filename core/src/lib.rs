@@ -85,6 +85,10 @@ impl Proxy {
         self.set_state(ProxyState::Disconnected);
     }
 
+    pub fn current_ssh(&self) -> Option<Arc<SshClient>> {
+        self.ssh.clone()
+    }
+
     /// 在当前 SSH 会话上（重新）建立 UDP 中继；失败则记录并保持 TCP/DNS 可用。
     async fn setup_udp(&self) {
         let Some(mgr) = &self.udp else { return };
