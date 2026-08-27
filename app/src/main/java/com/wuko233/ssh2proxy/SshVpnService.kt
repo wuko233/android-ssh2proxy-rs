@@ -28,6 +28,7 @@ class SshVpnService : VpnService() {
             .addAddress("10.0.0.2", 24)
             .addRoute("0.0.0.0", 0)
             .addDnsServer("10.0.0.1")
+            .addDisallowedApplication(packageName)
             .setSession("SSH2Proxy")
             .establish()
     }

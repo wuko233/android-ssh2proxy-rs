@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -70,13 +71,15 @@ fun LogScreen() {
                 if (lines.isEmpty()) {
                     Text("暂无日志", Modifier.align(Alignment.Center), style = MaterialTheme.typography.bodyLarge)
                 } else {
-                    LazyColumn(Modifier.fillMaxSize(), state = listState) {
-                        items(lines) { line ->
-                            Text(
-                                line,
-                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                    SelectionContainer {
+                        LazyColumn(Modifier.fillMaxSize(), state = listState) {
+                            items(lines) { line ->
+                                Text(
+                                    line,
+                                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         }
                     }
                 }
