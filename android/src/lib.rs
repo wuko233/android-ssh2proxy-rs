@@ -34,7 +34,7 @@ static LOGGER: CombinedLogger = CombinedLogger;
 
 impl log::Log for CombinedLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        metadata.level() <= log::Level::Debug
+        metadata.level() <= log::Level::Info
     }
 
     fn log(&self, record: &log::Record) {
@@ -81,7 +81,7 @@ fn runtime() -> Option<&'static Runtime> {
 #[no_mangle]
 pub extern "system" fn JNI_OnLoad(_vm: jni::JavaVM, _reserved: *mut std::ffi::c_void) -> jint {
     let _ = log::set_logger(&LOGGER);
-    log::set_max_level(log::LevelFilter::Debug);
+    log::set_max_level(log::LevelFilter::Info);
     jni::sys::JNI_VERSION_1_6
 }
 
