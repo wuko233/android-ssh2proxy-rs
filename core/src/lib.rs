@@ -67,11 +67,20 @@ impl Proxy {
 
     pub async fn connect(&mut self) -> Result<()> {
         self.set_state(ProxyState::Connecting);
-        let ssh = match SshClient::connect(&self.config).await {
-            Ok(ssh) => Arc::new(ssh),
-            Err(e) => {
+        let ssh = match tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            SshClient::connect(&self.config),
+        )
+        .await
+        {
+            Ok(Ok(ssh)) => Arc::new(ssh),
+            Ok(Err(e)) => {
                 self.set_state(ProxyState::Error);
                 return Err(e);
+            }
+            Err(_) => {
+                self.set_state(ProxyState::Error);
+                return Err(anyhow::anyhow!("connect timeout"));
             }
         };
         let socks_addr = format!("{}:{}", self.config.bind_addr, self.config.socks_port);

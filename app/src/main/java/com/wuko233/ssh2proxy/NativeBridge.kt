@@ -11,6 +11,6 @@ object NativeBridge {
     external fun getStats(): String
     external fun pollEvents(): String
     external fun runConnectivityTest(domain: String): String
+    external fun runLatencyTest(target: String): String
     external fun setLogLevel(debug: Boolean)
-    external fun runLatencyTest(): String
 }

@@ -217,15 +217,13 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
 
 #[no_mangle]
 pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runLatencyTest(
-    env: JNIEnv,
+    mut env: JNIEnv,
     _class: JClass,
+    target: JString,
 ) -> jstring {
+    let target: String = env.get_string(&target).map(|s| s.into()).unwrap_or_default();
+    let (target_host, target_port) = parse_target(&target);
     let ssh = ACTIVE_SSH.lock().unwrap_or_else(|e| e.into_inner()).clone();
-    let dns = PROXY_DNS
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
-        .unwrap_or_else(|| "8.8.8.8".to_string());
     let socks_addr = SOCKS_ADDR
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -235,7 +233,8 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runLatencyTest(
         (Some(rt), Some(ssh)) => rt.block_on(ssh2proxy_core::probe::measure_latency(
             &ssh,
             &ssh2proxy_core::socks5::Socks5Dialer { addr: socks_addr.parse().unwrap() },
-            &dns,
+            &target_host,
+            target_port,
         )),
         (_, None) => ssh2proxy_core::probe::LatencyResult {
             ssh_ok: false,
@@ -413,4 +412,20 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runConnectivityTe
         Ok(s) => s.into_raw(),
         Err(_) => std::ptr::null_mut(),
     }
+}
+
+/// 解析 "host:port" 形式的目标；默认 "223.5.5.5:53"，无端口时默认 443。
+fn parse_target(target: &str) -> (String, u16) {
+    if target.is_empty() {
+        return ("223.5.5.5".to_string(), 53);
+    }
+    if let Some(pos) = target.rfind(':') {
+        if let Ok(port) = target[pos + 1..].parse::<u16>() {
+            let host = &target[..pos];
+            if !host.is_empty() {
+                return (host.to_string(), port);
+            }
+        }
+    }
+    (target.to_string(), 443)
 }

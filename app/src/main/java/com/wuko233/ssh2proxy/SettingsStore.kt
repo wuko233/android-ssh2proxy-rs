@@ -10,6 +10,8 @@ object SettingsStore {
     private const val KEY_LAN_SHARE = "lan_share"
     private const val KEY_SOCKS_PORT = "socks_port"
     private const val KEY_HTTP_PORT = "http_port"
+    private const val KEY_TEST_DOMAIN = "test_domain"
+    private const val KEY_TEST_TARGET = "test_target"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -49,4 +51,16 @@ object SettingsStore {
 
     fun setHttpPort(ctx: Context, value: Int) =
         prefs(ctx).edit().putInt(KEY_HTTP_PORT, value).apply()
+
+    fun testDomain(ctx: Context): String =
+        prefs(ctx).getString(KEY_TEST_DOMAIN, "www.baidu.com") ?: "www.baidu.com"
+
+    fun setTestDomain(ctx: Context, value: String) =
+        prefs(ctx).edit().putString(KEY_TEST_DOMAIN, value).apply()
+
+    fun testTarget(ctx: Context): String =
+        prefs(ctx).getString(KEY_TEST_TARGET, "223.5.5.5:53") ?: "223.5.5.5:53"
+
+    fun setTestTarget(ctx: Context, value: String) =
+        prefs(ctx).edit().putString(KEY_TEST_TARGET, value).apply()
 }

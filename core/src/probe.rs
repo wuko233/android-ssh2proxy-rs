@@ -42,7 +42,8 @@ impl LatencyResult {
 pub async fn measure_latency(
     ssh: &crate::ssh::SshClient,
     dialer: &Socks5Dialer,
-    dns_server: &str,
+    target_host: &str,
+    target_port: u16,
 ) -> LatencyResult {
     let mut result = LatencyResult {
         ssh_ok: false,
@@ -69,7 +70,8 @@ pub async fn measure_latency(
     }
 
     let started = std::time::Instant::now();
-    match tokio::time::timeout(Duration::from_secs(10), dialer.connect(dns_server, 53)).await {
+    match tokio::time::timeout(Duration::from_secs(10), dialer.connect(target_host, target_port)).await
+    {
         Ok(Ok(_stream)) => {
             result.proxy_ok = true;
             result.proxy_latency_ms = Some(started.elapsed().as_millis() as u64);

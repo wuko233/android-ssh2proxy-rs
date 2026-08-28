@@ -10,6 +10,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -71,6 +73,7 @@ fun App() {
         var trafficDown by remember { mutableStateOf(0L) }
         var logLines by remember { mutableStateOf(listOf<String>()) }
         var localMode by remember { mutableStateOf(false) }
+        var connecting by remember { mutableStateOf(false) }
         val localIp = remember { getLocalIp() }
 
         val selected = profiles.firstOrNull { it.id == selectedId }
@@ -119,7 +122,7 @@ fun App() {
                 latencyTesting = true
                 latencyResult = null
                 val json = withContext(Dispatchers.IO) {
-                    NativeBridge.runLatencyTest()
+                    NativeBridge.runLatencyTest(SettingsStore.testTarget(ctx))
                 }
                 latencyResult = formatLatencyResult(json)
                 latencyTesting = false
@@ -127,6 +130,7 @@ fun App() {
         }
 
         fun doConnect(p: Profile) {
+            if (connecting) return
             val auth = JSONObject().put("type", "password").put("password", p.password)
             val bind = if (SettingsStore.lanShare(ctx)) "0.0.0.0" else "127.0.0.1"
             val cfg = JSONObject().put("host", p.host).put("port", p.port)
@@ -136,20 +140,28 @@ fun App() {
                 .put("bind_addr", bind)
                 .put("socks_port", SettingsStore.socksPort(ctx))
                 .put("http_port", SettingsStore.httpPort(ctx)).toString()
-            if (NativeBridge.connect(cfg) == 0) {
-                if (SettingsStore.localProxyMode(ctx)) {
-                    localMode = true
-                    connected = true
-                    status = ""
-                } else {
-                    localMode = false
-                    ctx.startService(Intent(ctx, SshVpnService::class.java))
-                    connected = true
-                    status = ""
+            scope.launch {
+                connecting = true
+                status = "连接中…"
+                val code = withContext(Dispatchers.IO) {
+                    NativeBridge.connect(cfg)
                 }
-                runLatencyProbe()
-            } else {
-                status = "连接失败（请检查主机/端口/账号）"
+                if (code == 0) {
+                    if (SettingsStore.localProxyMode(ctx)) {
+                        localMode = true
+                        connected = true
+                        status = ""
+                    } else {
+                        localMode = false
+                        ctx.startService(Intent(ctx, SshVpnService::class.java))
+                        connected = true
+                        status = ""
+                    }
+                    runLatencyProbe()
+                } else {
+                    status = "连接失败（请检查主机/端口/账号）"
+                }
+                connecting = false
             }
         }
 
@@ -187,7 +199,7 @@ fun App() {
                 testing = true
                 testResult = null
                 val json = withContext(Dispatchers.IO) {
-                    NativeBridge.runConnectivityTest("www.baidu.com")
+                    NativeBridge.runConnectivityTest(SettingsStore.testDomain(ctx))
                 }
                 testResult = formatProbeResult(json)
                 testing = false
@@ -328,10 +340,17 @@ fun App() {
                             Spacer(Modifier.height(8.dp))
                             Button(
                                 onClick = { if (connected) disconnect() else connect() },
-                                enabled = connected || selected != null,
+                                enabled = (connected || selected != null) && !connecting,
                                 modifier = Modifier.fillMaxWidth().height(48.dp)
                             ) {
-                                Text(if (connected) "断开连接" else "连接", fontWeight = FontWeight.Bold)
+                                Text(
+                                    when {
+                                        connecting -> "连接中…"
+                                        connected -> "断开连接"
+                                        else -> "连接"
+                                    },
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
 
                             if (connected) {
@@ -535,9 +554,11 @@ fun SettingsTab() {
     var lanShare by remember { mutableStateOf(SettingsStore.lanShare(ctx)) }
     var socksPortStr by remember { mutableStateOf(SettingsStore.socksPort(ctx).toString()) }
     var httpPortStr by remember { mutableStateOf(SettingsStore.httpPort(ctx).toString()) }
+    var testDomain by remember { mutableStateOf(SettingsStore.testDomain(ctx)) }
+    var testTarget by remember { mutableStateOf(SettingsStore.testTarget(ctx)) }
     var cleared by remember { mutableStateOf(false) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("网络", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -597,6 +618,33 @@ fun SettingsTab() {
                 modifier = Modifier.weight(1f)
             )
         }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+
+        Text("测试", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = testDomain,
+            onValueChange = {
+                testDomain = it
+                SettingsStore.setTestDomain(ctx, it)
+            },
+            label = { Text("连通性测试域名") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = testTarget,
+            onValueChange = {
+                testTarget = it
+                SettingsStore.setTestTarget(ctx, it)
+            },
+            label = { Text("出口延迟目标（host:port）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
