@@ -55,20 +55,12 @@ async fn serve_http(ssh: Arc<SshClient>, mut socket: TcpStream) -> anyhow::Resul
         }
         splice(&mut socket, &mut stream).await;
     } else {
-        // 普通 HTTP：把请求行改写为 origin-form 后原样转发
+        // 普通 HTTP：把请求行改写为 origin-form，其余头部原样保留后转发
         let path = origin_path(&target);
-        let hostport = if dst_port == 80 {
-            dst_host.clone()
-        } else {
-            format!("{dst_host}:{dst_port}")
-        };
-        let mut forward = Vec::with_capacity(head.len() + rest.len());
+        let first_end = find_subsequence(&head, b"\r\n").context("malformed request head")?;
+        let mut forward = Vec::with_capacity(head.len() + rest.len() + 16);
         forward.extend_from_slice(format!("{method} {path} HTTP/1.1\r\n").as_bytes());
-        // 追加原头部（跳过原来的请求行），再补上 Host
-        if let Some(pos) = find_subsequence(&head, b"\r\n") {
-            forward.extend_from_slice(&head[pos + 2..]);
-        }
-        forward.extend_from_slice(format!("Host: {hostport}\r\n\r\n").as_bytes());
+        forward.extend_from_slice(&head[first_end + 2..]);
         forward.extend_from_slice(&rest);
         stream.write_all(&forward).await?;
         splice(&mut socket, &mut stream).await;

@@ -11,7 +11,7 @@ pub mod state;
 pub mod udp;
 pub use state::{Auth, ProxyConfig, ProxyState, StateEvent};
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -20,6 +20,9 @@ use tokio::sync::{mpsc, Notify};
 use crate::socks5::start_socks5_server;
 use crate::ssh::SshClient;
 use crate::udp::UdpRelayManager;
+
+/// 共享的当前 SSH 会话单元（重连时由 Proxy 内部更新）。
+pub type SharedSsh = Arc<Mutex<Option<Arc<SshClient>>>>;
 
 /// Poll interval for the disconnect monitor. Kept short so a dropped session is
 /// detected promptly without busy-looping.
@@ -34,6 +37,7 @@ pub fn backoff_delay(attempt: u32) -> Duration {
 pub struct Proxy {
     config: ProxyConfig,
     ssh: Option<Arc<SshClient>>,
+    ssh_shared: SharedSsh,
     socks_handle: Option<tokio::task::JoinHandle<()>>,
     http_handle: Option<tokio::task::JoinHandle<()>>,
     udp: Option<Arc<UdpRelayManager>>,
@@ -51,6 +55,7 @@ impl Proxy {
         Self {
             config,
             ssh: None,
+            ssh_shared: Arc::new(Mutex::new(None)),
             socks_handle: None,
             http_handle: None,
             udp,
@@ -63,6 +68,11 @@ impl Proxy {
     /// Returns a handle used to stop a running reconnect loop.
     pub fn stop_handle(&self) -> Arc<Notify> {
         self.stop.clone()
+    }
+
+    /// 返回当前 SSH 会话的共享引用（重连时会被更新）。
+    pub fn ssh_shared(&self) -> SharedSsh {
+        self.ssh_shared.clone()
     }
 
     pub async fn connect(&mut self) -> Result<()> {
@@ -87,7 +97,8 @@ impl Proxy {
         let http_addr = format!("{}:{}", self.config.bind_addr, self.config.http_port);
         let handle = start_socks5_server(ssh.clone(), socks_addr.parse()?);
         let http_handle = crate::http::start_http_proxy(ssh.clone(), http_addr.parse()?);
-        self.ssh = Some(ssh);
+        self.ssh = Some(ssh.clone());
+        *self.ssh_shared.lock().unwrap_or_else(|e| e.into_inner()) = Some(ssh);
         self.socks_handle = Some(handle);
         self.http_handle = Some(http_handle);
         self.setup_udp().await;
@@ -99,10 +110,6 @@ impl Proxy {
         self.stop.notify_one();
         self.teardown().await;
         self.set_state(ProxyState::Disconnected);
-    }
-
-    pub fn current_ssh(&self) -> Option<Arc<SshClient>> {
-        self.ssh.clone()
     }
 
     /// 在当前 SSH 会话上（重新）建立 UDP 中继；失败则记录并保持 TCP/DNS 可用。
@@ -123,6 +130,7 @@ impl Proxy {
         if let Some(ssh) = self.ssh.take() {
             ssh.disconnect().await;
         }
+        *self.ssh_shared.lock().unwrap_or_else(|e| e.into_inner()) = None;
         if let Some(h) = self.socks_handle.take() {
             h.abort();
         }

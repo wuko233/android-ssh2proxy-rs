@@ -19,7 +19,7 @@ static STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static TUN_STOP: Mutex<Option<Arc<Notify>>> = Mutex::new(None);
 static PROXY_DNS: Mutex<Option<String>> = Mutex::new(None);
 static SOCKS_ADDR: Mutex<Option<String>> = Mutex::new(None);
-static ACTIVE_SSH: Mutex<Option<Arc<ssh2proxy_core::ssh::SshClient>>> = Mutex::new(None);
+static ACTIVE_SSH: Mutex<Option<ssh2proxy_core::SharedSsh>> = Mutex::new(None);
 static UDP_MGR: Mutex<Option<Arc<UdpRelayManager>>> = Mutex::new(None);
 static UDP_RESPONSE: Mutex<Option<mpsc::UnboundedReceiver<UdpResponse>>> = Mutex::new(None);
 static STATS: Mutex<Option<Arc<TrafficStats>>> = Mutex::new(None);
@@ -181,7 +181,7 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_connect(
             let stop = proxy.stop_handle();
             {
                 let mut slot = ACTIVE_SSH.lock().unwrap_or_else(|e| e.into_inner());
-                *slot = proxy.current_ssh();
+                *slot = Some(proxy.ssh_shared());
             }
             rt.spawn(async move {
                 while let Some(ev) = rx.recv().await {
@@ -223,7 +223,7 @@ pub extern "system" fn Java_com_wuko233_ssh2proxy_NativeBridge_runLatencyTest(
 ) -> jstring {
     let target: String = env.get_string(&target).map(|s| s.into()).unwrap_or_default();
     let (target_host, target_port) = parse_target(&target);
-    let ssh = ACTIVE_SSH.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let ssh = current_ssh();
     let socks_addr = SOCKS_ADDR
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -428,4 +428,13 @@ fn parse_target(target: &str) -> (String, u16) {
         }
     }
     (target.to_string(), 443)
+}
+
+/// 读取当前 SSH 会话（重连后由 Proxy 内部更新共享单元）。
+fn current_ssh() -> Option<Arc<ssh2proxy_core::ssh::SshClient>> {
+    ACTIVE_SSH
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .and_then(|cell| cell.lock().unwrap_or_else(|e| e.into_inner()).clone())
 }
