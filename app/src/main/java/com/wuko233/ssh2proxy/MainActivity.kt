@@ -699,7 +699,7 @@ fun ProfileCard(profile: Profile, selected: Boolean, onClick: () -> Unit, onEdit
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(
-                    "${profile.username}@${profile.host}:${profile.port}",
+                    if (profile.note.isNotBlank()) profile.note else "${profile.username}@${profile.host}:${profile.port}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -718,6 +718,7 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
     var username by remember { mutableStateOf(existing?.username ?: "root") }
     var password by remember { mutableStateOf(existing?.password ?: "") }
     var dnsServer by remember { mutableStateOf(existing?.dnsServer ?: "8.8.8.8") }
+    var note by remember { mutableStateOf(existing?.note ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -740,6 +741,10 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
                     value = dnsServer, onValueChange = { dnsServer = it }, label = { Text("DNS 服务器（国内建议 223.5.5.5）") },
                     singleLine = true
                 )
+                OutlinedTextField(
+                    value = note, onValueChange = { note = it }, label = { Text("备注（留空则显示地址）") },
+                    singleLine = true
+                )
             }
         },
         confirmButton = {
@@ -751,6 +756,7 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
                     username = username.trim(),
                     password = password,
                     dnsServer = dnsServer.trim().ifEmpty { "8.8.8.8" },
+                    note = note.trim(),
                 )
                 onSave(p)
             }) { Text("保存") }
