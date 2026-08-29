@@ -401,7 +401,10 @@ fun App() {
                         }
                     }
                     1 -> LogTab(logLines) { logLines = emptyList() }
-                    else -> SettingsTab()
+                    else -> SettingsTab(onImported = {
+                        profiles = ProfileStore.load(ctx)
+                        selectedId = profiles.firstOrNull()?.id
+                    })
                 }
             }
         }
@@ -546,7 +549,7 @@ fun LogTab(lines: List<String>, onClear: () -> Unit) {
 }
 
 @Composable
-fun SettingsTab() {
+fun SettingsTab(onImported: () -> Unit) {
     val ctx = LocalContext.current
     var udp by remember { mutableStateOf(SettingsStore.udpEnabled(ctx)) }
     var logDebug by remember { mutableStateOf(SettingsStore.logDebug(ctx)) }
@@ -557,6 +560,37 @@ fun SettingsTab() {
     var testDomain by remember { mutableStateOf(SettingsStore.testDomain(ctx)) }
     var testTarget by remember { mutableStateOf(SettingsStore.testTarget(ctx)) }
     var cleared by remember { mutableStateOf(false) }
+    var backupMsg by remember { mutableStateOf("") }
+
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            backupMsg = try {
+                val json = BackupStore.exportJson(ctx)
+                ctx.contentResolver.openOutputStream(uri)?.use { os ->
+                    os.write(json.toByteArray(Charsets.UTF_8))
+                }
+                "导出成功"
+            } catch (e: Exception) {
+                "导出失败：${e.message}"
+            }
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            backupMsg = try {
+                val json = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
+                if (json != null && BackupStore.importJson(ctx, json)) {
+                    onImported()
+                    "导入成功"
+                } else {
+                    "导入失败（格式不正确）"
+                }
+            } catch (e: Exception) {
+                "导入失败：${e.message}"
+            }
+        }
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
         Text("网络", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -671,6 +705,25 @@ fun SettingsTab() {
         Text("SSH2Proxy v0.1.0")
         Text("基于 Rust 的 SSH 全局代理")
         Spacer(Modifier.height(24.dp))
+
+        Text("备份与恢复", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedButton(
+                onClick = { exportLauncher.launch("ssh2proxy-backup.json") },
+                modifier = Modifier.weight(1f)
+            ) { Text("导出配置") }
+            OutlinedButton(
+                onClick = { importLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
+                modifier = Modifier.weight(1f)
+            ) { Text("导入配置") }
+        }
+        if (backupMsg.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(backupMsg, style = MaterialTheme.typography.bodySmall)
+        }
+        Spacer(Modifier.height(16.dp))
+
         OutlinedButton(onClick = {
             ProfileStore.save(ctx, emptyList())
             cleared = true
