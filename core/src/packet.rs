@@ -97,11 +97,11 @@ pub fn parse_udp<'a>(buf: &'a [u8]) -> Option<UdpDatagram<'a>> {
 
 pub fn internet_checksum(data: &[u8]) -> u16 {
     let mut sum: u32 = 0;
-    let mut chunks = data.chunks_exact(2);
-    for c in &mut chunks {
-        sum += u16::from_be_bytes([c[0], c[1]]) as u32;
+    let (chunks, remainder) = data.as_chunks::<2>();
+    for c in chunks {
+        sum += u16::from_be_bytes(*c) as u32;
     }
-    if let [b] = chunks.remainder() {
+    if let [b] = remainder {
         sum += (*b as u32) << 8;
     }
     while sum >> 16 != 0 {

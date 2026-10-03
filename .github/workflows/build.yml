@@ -54,14 +54,11 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK and NDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platforms;android-37.0
-            build-tools;36.0.0
-            build-tools;37.0.0
-            ndk;${{ env.NDK_VERSION }}
+
+      - name: Install Android SDK packages and NDK
+        run: sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0" "ndk;$NDK_VERSION"
 
       - name: Set up Rust with Android target
         uses: dtolnay/rust-toolchain@stable
