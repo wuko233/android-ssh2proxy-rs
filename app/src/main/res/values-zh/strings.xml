@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SSH2Proxy</string>
+
+    <!-- 顶栏标题 / 底部导航 -->
+    <string name="title_home">SSH2Proxy</string>
+    <string name="title_log">运行日志</string>
+    <string name="title_settings">设置</string>
+    <string name="tab_home">主页</string>
+    <string name="tab_log">日志</string>
+    <string name="tab_settings">设置</string>
+
+    <!-- 通用操作 -->
+    <string name="unknown">未知</string>
+    <string name="cancel">取消</string>
+    <string name="save">保存</string>
+    <string name="edit">编辑</string>
+    <string name="delete">删除</string>
+    <string name="clear">清空</string>
+
+    <!-- 主页 -->
+    <string name="home_local_ip">本机 IP：%1$s</string>
+    <string name="home_no_profiles">还没有 SSH 配置\n点右下角 ＋ 添加</string>
+    <string name="home_connect">连接</string>
+    <string name="home_disconnect">断开连接</string>
+    <string name="home_connecting">连接中…</string>
+    <string name="home_connect_failed">连接失败（请检查主机/端口/账号）</string>
+    <string name="home_disconnected">已断开</string>
+    <string name="home_status">状态：%1$s</string>
+    <string name="home_connected">已连接</string>
+    <string name="home_upload">上传</string>
+    <string name="home_download">下载</string>
+    <string name="home_proxy_started">本地代理已启动</string>
+    <string name="home_lan_hint">局域网内其他设备可连接上面的地址</string>
+    <string name="home_local_only_hint">仅本机可用，局域网共享请在设置开启</string>
+    <string name="home_test_connectivity">连通性测试</string>
+    <string name="home_testing">测试中…</string>
+    <string name="home_test_latency">测试延迟</string>
+    <string name="home_testing_latency">延迟测试中…</string>
+
+    <!-- 连通性测试结果 -->
+    <string name="probe_failed_no_response">测试失败（无响应）</string>
+    <string name="probe_failed">测试失败: %1$s</string>
+    <string name="probe_domain">域名: %1$s</string>
+    <string name="probe_tunnel_tcp">隧道TCP连通: %1$s</string>
+    <string name="probe_dns">DNS 解析: %1$s</string>
+    <string name="probe_resolved_ips">解析 IP: %1$s</string>
+    <string name="probe_none">无</string>
+    <string name="probe_tcp_443">TCP 连通(443): %1$s</string>
+    <string name="probe_ok">✓ 成功</string>
+    <string name="probe_fail">✗ 失败</string>
+    <string name="probe_error">错误: %1$s</string>
+
+    <!-- 延迟测试结果 -->
+    <string name="latency_failed_no_response">延迟测试失败（无响应）</string>
+    <string name="latency_failed">延迟测试失败：%1$s</string>
+    <string name="latency_result">延迟测试\nSSH 服务器：%1$s\n代理出口：%2$s</string>
+    <string name="latency_failed_reason">失败：%1$s</string>
+    <string name="latency_unknown_error">未知错误</string>
+
+    <!-- 设置 -->
+    <string name="settings_network">网络</string>
+    <string name="settings_local_proxy">仅本地代理</string>
+    <string name="settings_local_proxy_desc">连接后只开放本地 SOCKS5/HTTP 代理，不建立 VPN</string>
+    <string name="settings_lan_share">局域网共享</string>
+    <string name="settings_lan_share_desc">监听 0.0.0.0，让局域网内其他设备也能用</string>
+    <string name="settings_udp">UDP 转发</string>
+    <string name="settings_udp_desc">通过 SSH 隧道转发 UDP 流量（QUIC/游戏语音）</string>
+    <string name="settings_socks_port">SOCKS5 端口</string>
+    <string name="settings_http_port">HTTP 端口</string>
+    <string name="settings_test">测试</string>
+    <string name="settings_test_domain">连通性测试域名</string>
+    <string name="settings_test_target">出口延迟目标（host:port）</string>
+    <string name="settings_log">日志</string>
+    <string name="settings_verbose_log">详细日志</string>
+    <string name="settings_verbose_log_desc">输出 Debug 级别日志（排查问题时开启）</string>
+    <string name="settings_language">语言</string>
+    <string name="settings_language_system">跟随系统</string>
+    <string name="settings_language_zh">中文</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_about_desc">基于 Rust 的 SSH 全局代理</string>
+    <string name="settings_backup">备份与恢复</string>
+    <string name="settings_export">导出配置</string>
+    <string name="settings_import">导入配置</string>
+    <string name="settings_export_ok">导出成功</string>
+    <string name="settings_export_fail">导出失败：%1$s</string>
+    <string name="settings_import_ok">导入成功</string>
+    <string name="settings_import_invalid">导入失败（格式不正确）</string>
+    <string name="settings_import_fail">导入失败：%1$s</string>
+    <string name="settings_clear_all">清除所有配置</string>
+    <string name="settings_cleared">已清除，请回到主页重新添加</string>
+
+    <!-- 配置弹窗 / 卡片 -->
+    <string name="profile_add_title">添加 SSH 配置</string>
+    <string name="profile_edit_title">编辑 SSH 配置</string>
+    <string name="profile_host">主机地址</string>
+    <string name="profile_port">端口</string>
+    <string name="profile_username">用户名</string>
+    <string name="profile_password">密码</string>
+    <string name="profile_dns">DNS 服务器（国内建议 223.5.5.5）</string>
+    <string name="profile_note">备注（留空则显示地址）</string>
+    <string name="profile_dns_label">DNS: %1$s</string>
+
+    <!-- 日志页 -->
+    <string name="log_empty">暂无日志</string>
+
+    <!-- 通知 -->
+    <string name="notif_channel_vpn">VPN</string>
+    <string name="notif_running">代理运行中</string>
+</resources>

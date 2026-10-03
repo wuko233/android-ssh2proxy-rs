@@ -12,6 +12,7 @@ object SettingsStore {
     private const val KEY_HTTP_PORT = "http_port"
     private const val KEY_TEST_DOMAIN = "test_domain"
     private const val KEY_TEST_TARGET = "test_target"
+    private const val KEY_LANGUAGE = "language"
 
     private fun prefs(ctx: Context) =
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -63,4 +64,10 @@ object SettingsStore {
 
     fun setTestTarget(ctx: Context, value: String) =
         prefs(ctx).edit().putString(KEY_TEST_TARGET, value).apply()
+
+    fun language(ctx: Context): String =
+        prefs(ctx).getString(KEY_LANGUAGE, LocaleHelper.SYSTEM) ?: LocaleHelper.SYSTEM
+
+    fun setLanguage(ctx: Context, value: String) =
+        prefs(ctx).edit().putString(KEY_LANGUAGE, value).apply()
 }

@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SSH2Proxy</string>
+
+    <!-- Top bar titles / bottom navigation -->
+    <string name="title_home">SSH2Proxy</string>
+    <string name="title_log">Logs</string>
+    <string name="title_settings">Settings</string>
+    <string name="tab_home">Home</string>
+    <string name="tab_log">Log</string>
+    <string name="tab_settings">Settings</string>
+
+    <!-- Common actions -->
+    <string name="unknown">Unknown</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="edit">Edit</string>
+    <string name="delete">Delete</string>
+    <string name="clear">Clear</string>
+
+    <!-- Home -->
+    <string name="home_local_ip">Local IP: %1$s</string>
+    <string name="home_no_profiles">No SSH profile yet\nTap + at the bottom right to add one</string>
+    <string name="home_connect">Connect</string>
+    <string name="home_disconnect">Disconnect</string>
+    <string name="home_connecting">Connecting…</string>
+    <string name="home_connect_failed">Connection failed (check host / port / credentials)</string>
+    <string name="home_disconnected">Disconnected</string>
+    <string name="home_status">Status: %1$s</string>
+    <string name="home_connected">Connected</string>
+    <string name="home_upload">Upload</string>
+    <string name="home_download">Download</string>
+    <string name="home_proxy_started">Local proxy started</string>
+    <string name="home_lan_hint">Other devices on the LAN can use the addresses above</string>
+    <string name="home_local_only_hint">Local only. Enable LAN sharing in Settings to share it.</string>
+    <string name="home_test_connectivity">Connectivity test</string>
+    <string name="home_testing">Testing…</string>
+    <string name="home_test_latency">Latency test</string>
+    <string name="home_testing_latency">Testing latency…</string>
+
+    <!-- Connectivity probe result -->
+    <string name="probe_failed_no_response">Test failed (no response)</string>
+    <string name="probe_failed">Test failed: %1$s</string>
+    <string name="probe_domain">Domain: %1$s</string>
+    <string name="probe_tunnel_tcp">Tunnel TCP: %1$s</string>
+    <string name="probe_dns">DNS resolve: %1$s</string>
+    <string name="probe_resolved_ips">Resolved IPs: %1$s</string>
+    <string name="probe_none">none</string>
+    <string name="probe_tcp_443">TCP connect (443): %1$s</string>
+    <string name="probe_ok">✓ OK</string>
+    <string name="probe_fail">✗ Failed</string>
+    <string name="probe_error">Error: %1$s</string>
+
+    <!-- Latency probe result -->
+    <string name="latency_failed_no_response">Latency test failed (no response)</string>
+    <string name="latency_failed">Latency test failed: %1$s</string>
+    <string name="latency_result">Latency test\nSSH server: %1$s\nProxy egress: %2$s</string>
+    <string name="latency_failed_reason">Failed: %1$s</string>
+    <string name="latency_unknown_error">unknown error</string>
+
+    <!-- Settings -->
+    <string name="settings_network">Network</string>
+    <string name="settings_local_proxy">Local proxy only</string>
+    <string name="settings_local_proxy_desc">Only expose the local SOCKS5/HTTP proxy, no VPN</string>
+    <string name="settings_lan_share">LAN sharing</string>
+    <string name="settings_lan_share_desc">Listen on 0.0.0.0 so other devices on the LAN can use it</string>
+    <string name="settings_udp">UDP forwarding</string>
+    <string name="settings_udp_desc">Forward UDP over the SSH tunnel (QUIC / game voice)</string>
+    <string name="settings_socks_port">SOCKS5 port</string>
+    <string name="settings_http_port">HTTP port</string>
+    <string name="settings_test">Test</string>
+    <string name="settings_test_domain">Connectivity test domain</string>
+    <string name="settings_test_target">Egress latency target (host:port)</string>
+    <string name="settings_log">Logs</string>
+    <string name="settings_verbose_log">Verbose logging</string>
+    <string name="settings_verbose_log_desc">Output Debug-level logs (enable when troubleshooting)</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_language_system">System default</string>
+    <string name="settings_language_zh">中文</string>
+    <string name="settings_language_en">English</string>
+    <string name="settings_about">About</string>
+    <string name="settings_about_desc">Rust-based SSH global proxy</string>
+    <string name="settings_backup">Backup &amp; Restore</string>
+    <string name="settings_export">Export config</string>
+    <string name="settings_import">Import config</string>
+    <string name="settings_export_ok">Exported</string>
+    <string name="settings_export_fail">Export failed: %1$s</string>
+    <string name="settings_import_ok">Imported</string>
+    <string name="settings_import_invalid">Import failed (invalid format)</string>
+    <string name="settings_import_fail">Import failed: %1$s</string>
+    <string name="settings_clear_all">Clear all configs</string>
+    <string name="settings_cleared">Cleared. Go back to Home and add a profile again.</string>
+
+    <!-- Profile dialog / card -->
+    <string name="profile_add_title">Add SSH profile</string>
+    <string name="profile_edit_title">Edit SSH profile</string>
+    <string name="profile_host">Host</string>
+    <string name="profile_port">Port</string>
+    <string name="profile_username">Username</string>
+    <string name="profile_password">Password</string>
+    <string name="profile_dns">DNS server (223.5.5.5 in China)</string>
+    <string name="profile_note">Note (empty shows the address)</string>
+    <string name="profile_dns_label">DNS: %1$s</string>
+
+    <!-- Log tab -->
+    <string name="log_empty">No logs yet</string>
+
+    <!-- Notification -->
+    <string name="notif_channel_vpn">VPN</string>
+    <string name="notif_running">Proxy running</string>
+</resources>

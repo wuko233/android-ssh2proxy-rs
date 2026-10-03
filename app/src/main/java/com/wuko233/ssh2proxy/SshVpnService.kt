@@ -27,7 +27,7 @@ class SshVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(1, buildNotification("代理运行中"))
+        startForeground(1, buildNotification(getString(R.string.notif_running)))
         val fd = establish() ?: return START_NOT_STICKY
         NativeBridge.setTunFd(fd.detachFd())
         lastUp = 0L
@@ -80,7 +80,7 @@ class SshVpnService : VpnService() {
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val ch = NotificationChannel("vpn", "VPN", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel("vpn", getString(R.string.notif_channel_vpn), NotificationManager.IMPORTANCE_LOW)
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
             Notification.Builder(this, "vpn")
                 .setContentTitle("SSH2Proxy")

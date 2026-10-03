@@ -27,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -45,6 +46,10 @@ import java.util.Locale
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(LocaleHelper.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         NativeBridge.setLogLevel(SettingsStore.logDebug(applicationContext))
@@ -124,7 +129,7 @@ fun App() {
                 val json = withContext(Dispatchers.IO) {
                     NativeBridge.runLatencyTest(SettingsStore.testTarget(ctx))
                 }
-                latencyResult = formatLatencyResult(json)
+                latencyResult = formatLatencyResult(ctx, json)
                 latencyTesting = false
             }
         }
@@ -142,7 +147,7 @@ fun App() {
                 .put("http_port", SettingsStore.httpPort(ctx)).toString()
             scope.launch {
                 connecting = true
-                status = "连接中…"
+                status = ctx.getString(R.string.home_connecting)
                 val code = withContext(Dispatchers.IO) {
                     NativeBridge.connect(cfg)
                 }
@@ -159,7 +164,7 @@ fun App() {
                     }
                     runLatencyProbe()
                 } else {
-                    status = "连接失败（请检查主机/端口/账号）"
+                    status = ctx.getString(R.string.home_connect_failed)
                 }
                 connecting = false
             }
@@ -190,7 +195,7 @@ fun App() {
             ctx.stopService(Intent(ctx, SshVpnService::class.java))
             connected = false
             localMode = false
-            status = "已断开"
+            status = ctx.getString(R.string.home_disconnected)
             testResult = null
         }
 
@@ -201,7 +206,7 @@ fun App() {
                 val json = withContext(Dispatchers.IO) {
                     NativeBridge.runConnectivityTest(SettingsStore.testDomain(ctx))
                 }
-                testResult = formatProbeResult(json)
+                testResult = formatProbeResult(ctx, json)
                 testing = false
             }
         }
@@ -212,9 +217,9 @@ fun App() {
                     title = {
                         Text(
                             when (tab) {
-                                0 -> "SSH2Proxy"
-                                1 -> "运行日志"
-                                else -> "设置"
+                                0 -> stringResource(R.string.title_home)
+                                1 -> stringResource(R.string.title_log)
+                                else -> stringResource(R.string.title_settings)
                             },
                             fontWeight = FontWeight.Bold
                         )
@@ -226,20 +231,20 @@ fun App() {
                     NavigationBarItem(
                         selected = tab == 0,
                         onClick = { tab = 0 },
-                        icon = { Icon(Icons.Filled.Home, contentDescription = "主页") },
-                        label = { Text("主页") }
+                        icon = { Icon(Icons.Filled.Home, contentDescription = stringResource(R.string.tab_home)) },
+                        label = { Text(stringResource(R.string.tab_home)) }
                     )
                     NavigationBarItem(
                         selected = tab == 1,
                         onClick = { tab = 1 },
-                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = "日志") },
-                        label = { Text("日志") }
+                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = stringResource(R.string.tab_log)) },
+                        label = { Text(stringResource(R.string.tab_log)) }
                     )
                     NavigationBarItem(
                         selected = tab == 2,
                         onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.Settings, contentDescription = "设置") },
-                        label = { Text("设置") }
+                        icon = { Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.tab_settings)) },
+                        label = { Text(stringResource(R.string.tab_settings)) }
                     )
                 }
             },
@@ -253,7 +258,7 @@ fun App() {
                 when (tab) {
                     0 -> {
                         Column(Modifier.fillMaxSize().padding(16.dp)) {
-                            Text("本机 IP：$localIp", style = MaterialTheme.typography.bodySmall)
+                            Text(stringResource(R.string.home_local_ip, localIp ?: stringResource(R.string.unknown)), style = MaterialTheme.typography.bodySmall)
                             Spacer(Modifier.height(8.dp))
                             if (connected) {
                                 if (localMode) {
@@ -268,12 +273,12 @@ fun App() {
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                                     ) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                            Text("本地代理已启动", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Text(stringResource(R.string.home_proxy_started), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                             Spacer(Modifier.height(8.dp))
                                             Text("SOCKS5: $socksHost:$socksPort", style = MaterialTheme.typography.bodyMedium)
                                             Text("HTTP:   $httpHost:$httpPort", style = MaterialTheme.typography.bodyMedium)
                                             Spacer(Modifier.height(8.dp))
-                                            Text(if (lan) "局域网内其他设备可连接上面的地址" else "仅本机可用，局域网共享请在设置开启", style = MaterialTheme.typography.bodySmall)
+                                            Text(if (lan) stringResource(R.string.home_lan_hint) else stringResource(R.string.home_local_only_hint), style = MaterialTheme.typography.bodySmall)
                                         }
                                     }
                                 } else {
@@ -283,16 +288,16 @@ fun App() {
                                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
                                     ) {
                                         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                                            Text("已连接", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                                            Text(stringResource(R.string.home_connected), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                             Spacer(Modifier.height(12.dp))
                                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                                 Column(Modifier.weight(1f)) {
-                                                    Text("上传", style = MaterialTheme.typography.bodySmall)
+                                                    Text(stringResource(R.string.home_upload), style = MaterialTheme.typography.bodySmall)
                                                     Text(formatBytes(trafficUp), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                                                 }
                                                 VerticalDivider(Modifier.height(40.dp))
                                                 Column(Modifier.weight(1f)) {
-                                                    Text("下载", style = MaterialTheme.typography.bodySmall)
+                                                    Text(stringResource(R.string.home_download), style = MaterialTheme.typography.bodySmall)
                                                     Text(formatBytes(trafficDown), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleLarge)
                                                 }
                                             }
@@ -307,7 +312,7 @@ fun App() {
                                     color = MaterialTheme.colorScheme.surfaceVariant
                                 ) {
                                     Text(
-                                        "状态：$status",
+                                        stringResource(R.string.home_status, status),
                                         modifier = Modifier.padding(12.dp),
                                         fontWeight = FontWeight.Medium
                                     )
@@ -317,7 +322,7 @@ fun App() {
 
                             if (profiles.isEmpty()) {
                                 Box(Modifier.weight(0.7f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    Text("还没有 SSH 配置\n点右下角 ＋ 添加", style = MaterialTheme.typography.bodyLarge)
+                                    Text(stringResource(R.string.home_no_profiles), style = MaterialTheme.typography.bodyLarge)
                                 }
                             } else {
                                 LazyColumn(Modifier.weight(0.7f)) {
@@ -345,9 +350,9 @@ fun App() {
                             ) {
                                 Text(
                                     when {
-                                        connecting -> "连接中…"
-                                        connected -> "断开连接"
-                                        else -> "连接"
+                                        connecting -> stringResource(R.string.home_connecting)
+                                        connected -> stringResource(R.string.home_disconnect)
+                                        else -> stringResource(R.string.home_connect)
                                     },
                                     fontWeight = FontWeight.Bold
                                 )
@@ -361,14 +366,14 @@ fun App() {
                                         enabled = !testing,
                                         modifier = Modifier.weight(1f).height(44.dp)
                                     ) {
-                                        Text(if (testing) "测试中…" else "连通性测试", fontWeight = FontWeight.Medium)
+                                        Text(if (testing) stringResource(R.string.home_testing) else stringResource(R.string.home_test_connectivity), fontWeight = FontWeight.Medium)
                                     }
                                     OutlinedButton(
                                         onClick = { runLatencyProbe() },
                                         enabled = !latencyTesting,
                                         modifier = Modifier.weight(1f).height(44.dp)
                                     ) {
-                                        Text(if (latencyTesting) "延迟测试中…" else "测试延迟", fontWeight = FontWeight.Medium)
+                                        Text(if (latencyTesting) stringResource(R.string.home_testing_latency) else stringResource(R.string.home_test_latency), fontWeight = FontWeight.Medium)
                                     }
                                 }
                             }
@@ -436,8 +441,8 @@ fun App() {
     }
 }
 
-fun formatProbeResult(json: String?): String {
-    if (json.isNullOrEmpty()) return "测试失败（无响应）"
+fun formatProbeResult(ctx: Context, json: String?): String {
+    if (json.isNullOrEmpty()) return ctx.getString(R.string.probe_failed_no_response)
     return try {
         val o = JSONObject(json)
         val socksTcp = o.optBoolean("socks_tcp_ok")
@@ -445,39 +450,42 @@ fun formatProbeResult(json: String?): String {
         val ips = o.optJSONArray("resolved_ips")
         val ipsStr = if (ips != null && ips.length() > 0) {
             (0 until ips.length()).joinToString(", ") { ips.getString(it) }
-        } else "无"
+        } else ctx.getString(R.string.probe_none)
         val tcpOk = o.optBoolean("tcp_connect_ok")
         val err = o.optString("error")
+        val ok = ctx.getString(R.string.probe_ok)
+        val fail = ctx.getString(R.string.probe_fail)
         buildString {
-            append("域名: ").append(o.optString("domain")).append('\n')
-            append("隧道TCP连通: ").append(if (socksTcp) "✓" else "✗").append('\n')
-            append("DNS 解析: ").append(if (dnsOk) "✓ 成功" else "✗ 失败").append('\n')
-            append("解析 IP: ").append(ipsStr).append('\n')
-            append("TCP 连通(443): ").append(if (tcpOk) "✓ 成功" else "✗ 失败")
-            if (err.isNotEmpty()) append('\n').append("错误: ").append(err)
+            append(ctx.getString(R.string.probe_domain, o.optString("domain"))).append('\n')
+            append(ctx.getString(R.string.probe_tunnel_tcp, if (socksTcp) ok else fail)).append('\n')
+            append(ctx.getString(R.string.probe_dns, if (dnsOk) ok else fail)).append('\n')
+            append(ctx.getString(R.string.probe_resolved_ips, ipsStr)).append('\n')
+            append(ctx.getString(R.string.probe_tcp_443, if (tcpOk) ok else fail))
+            if (err.isNotEmpty()) append('\n').append(ctx.getString(R.string.probe_error, err))
         }
     } catch (_: Exception) {
-        "测试失败: $json"
+        ctx.getString(R.string.probe_failed, json)
     }
 }
 
-fun formatLatencyResult(json: String?): String {
-    if (json.isNullOrEmpty()) return "延迟测试失败（无响应）"
+fun formatLatencyResult(ctx: Context, json: String?): String {
+    if (json.isNullOrEmpty()) return ctx.getString(R.string.latency_failed_no_response)
     return try {
         val o = JSONObject(json)
+        val unknown = ctx.getString(R.string.latency_unknown_error)
         val sshText = if (o.optBoolean("ssh_ok")) {
             "${o.optLong("ssh_latency_ms")} ms"
         } else {
-            "失败：${o.optString("ssh_error", "未知错误")}"
+            ctx.getString(R.string.latency_failed_reason, o.optString("ssh_error", unknown))
         }
         val proxyText = if (o.optBoolean("proxy_ok")) {
             "${o.optLong("proxy_latency_ms")} ms"
         } else {
-            "失败：${o.optString("proxy_error", "未知错误")}"
+            ctx.getString(R.string.latency_failed_reason, o.optString("proxy_error", unknown))
         }
-        "延迟测试\nSSH 服务器：$sshText\n代理出口：$proxyText"
+        ctx.getString(R.string.latency_result, sshText, proxyText)
     } catch (_: Exception) {
-        "延迟测试失败：$json"
+        ctx.getString(R.string.latency_failed, json)
     }
 }
 
@@ -493,7 +501,7 @@ fun formatBytes(b: Long): String {
     }
 }
 
-fun getLocalIp(): String {
+fun getLocalIp(): String? {
     try {
         val interfaces = NetworkInterface.getNetworkInterfaces()
         while (interfaces.hasMoreElements()) {
@@ -511,7 +519,7 @@ fun getLocalIp(): String {
         }
     } catch (_: Exception) {
     }
-    return "未知"
+    return null
 }
 
 @Composable
@@ -526,11 +534,11 @@ fun LogTab(lines: List<String>, onClear: () -> Unit) {
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.End
         ) {
-            TextButton(onClick = onClear) { Text("清空") }
+            TextButton(onClick = onClear) { Text(stringResource(R.string.clear)) }
         }
         if (lines.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无日志", style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.log_empty), style = MaterialTheme.typography.bodyLarge)
             }
         } else {
             SelectionContainer {
@@ -561,6 +569,7 @@ fun SettingsTab(onImported: () -> Unit) {
     var testTarget by remember { mutableStateOf(SettingsStore.testTarget(ctx)) }
     var cleared by remember { mutableStateOf(false) }
     var backupMsg by remember { mutableStateOf("") }
+    var language by remember { mutableStateOf(SettingsStore.language(ctx)) }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
@@ -569,9 +578,9 @@ fun SettingsTab(onImported: () -> Unit) {
                 ctx.contentResolver.openOutputStream(uri)?.use { os ->
                     os.write(json.toByteArray(Charsets.UTF_8))
                 }
-                "导出成功"
+                ctx.getString(R.string.settings_export_ok)
             } catch (e: Exception) {
-                "导出失败：${e.message}"
+                ctx.getString(R.string.settings_export_fail, e.message ?: "")
             }
         }
     }
@@ -582,23 +591,23 @@ fun SettingsTab(onImported: () -> Unit) {
                 val json = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
                 if (json != null && BackupStore.importJson(ctx, json)) {
                     onImported()
-                    "导入成功"
+                    ctx.getString(R.string.settings_import_ok)
                 } else {
-                    "导入失败（格式不正确）"
+                    ctx.getString(R.string.settings_import_invalid)
                 }
             } catch (e: Exception) {
-                "导入失败：${e.message}"
+                ctx.getString(R.string.settings_import_fail, e.message ?: "")
             }
         }
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
-        Text("网络", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_network), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("仅本地代理", style = MaterialTheme.typography.bodyLarge)
-                Text("连接后只开放本地 SOCKS5/HTTP 代理，不建立 VPN", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.settings_local_proxy), style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.settings_local_proxy_desc), style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = localProxy, onCheckedChange = {
                 localProxy = it
@@ -608,8 +617,8 @@ fun SettingsTab(onImported: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("局域网共享", style = MaterialTheme.typography.bodyLarge)
-                Text("监听 0.0.0.0，让局域网内其他设备也能用", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.settings_lan_share), style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.settings_lan_share_desc), style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = lanShare, onCheckedChange = {
                 lanShare = it
@@ -619,8 +628,8 @@ fun SettingsTab(onImported: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("UDP 转发", style = MaterialTheme.typography.bodyLarge)
-                Text("通过 SSH 隧道转发 UDP 流量（QUIC/游戏语音）", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.settings_udp), style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.settings_udp_desc), style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = udp, onCheckedChange = {
                 udp = it
@@ -635,7 +644,7 @@ fun SettingsTab(onImported: () -> Unit) {
                     socksPortStr = it
                     it.toIntOrNull()?.let { p -> SettingsStore.setSocksPort(ctx, p) }
                 },
-                label = { Text("SOCKS5 端口") },
+                label = { Text(stringResource(R.string.settings_socks_port)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f)
@@ -646,7 +655,7 @@ fun SettingsTab(onImported: () -> Unit) {
                     httpPortStr = it
                     it.toIntOrNull()?.let { p -> SettingsStore.setHttpPort(ctx, p) }
                 },
-                label = { Text("HTTP 端口") },
+                label = { Text(stringResource(R.string.settings_http_port)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.weight(1f)
@@ -656,7 +665,42 @@ fun SettingsTab(onImported: () -> Unit) {
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
 
-        Text("测试", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_language), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = language == LocaleHelper.SYSTEM,
+                onClick = {
+                    language = LocaleHelper.SYSTEM
+                    SettingsStore.setLanguage(ctx, LocaleHelper.SYSTEM)
+                    ctx.findActivity()?.recreate()
+                },
+                label = { Text(stringResource(R.string.settings_language_system)) }
+            )
+            FilterChip(
+                selected = language == LocaleHelper.ZH,
+                onClick = {
+                    language = LocaleHelper.ZH
+                    SettingsStore.setLanguage(ctx, LocaleHelper.ZH)
+                    ctx.findActivity()?.recreate()
+                },
+                label = { Text(stringResource(R.string.settings_language_zh)) }
+            )
+            FilterChip(
+                selected = language == LocaleHelper.EN,
+                onClick = {
+                    language = LocaleHelper.EN
+                    SettingsStore.setLanguage(ctx, LocaleHelper.EN)
+                    ctx.findActivity()?.recreate()
+                },
+                label = { Text(stringResource(R.string.settings_language_en)) }
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+
+        Text(stringResource(R.string.settings_test), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = testDomain,
@@ -664,7 +708,7 @@ fun SettingsTab(onImported: () -> Unit) {
                 testDomain = it
                 SettingsStore.setTestDomain(ctx, it)
             },
-            label = { Text("连通性测试域名") },
+            label = { Text(stringResource(R.string.settings_test_domain)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -675,7 +719,7 @@ fun SettingsTab(onImported: () -> Unit) {
                 testTarget = it
                 SettingsStore.setTestTarget(ctx, it)
             },
-            label = { Text("出口延迟目标（host:port）") },
+            label = { Text(stringResource(R.string.settings_test_target)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
         )
@@ -683,12 +727,12 @@ fun SettingsTab(onImported: () -> Unit) {
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
 
-        Text("日志", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_log), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text("详细日志", style = MaterialTheme.typography.bodyLarge)
-                Text("输出 Debug 级别日志（排查问题时开启）", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.settings_verbose_log), style = MaterialTheme.typography.bodyLarge)
+                Text(stringResource(R.string.settings_verbose_log_desc), style = MaterialTheme.typography.bodySmall)
             }
             Switch(checked = logDebug, onCheckedChange = {
                 logDebug = it
@@ -700,23 +744,23 @@ fun SettingsTab(onImported: () -> Unit) {
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
 
-        Text("关于", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_about), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text("SSH2Proxy v0.1.0")
-        Text("基于 Rust 的 SSH 全局代理")
+        Text(stringResource(R.string.settings_about_desc))
         Spacer(Modifier.height(24.dp))
 
-        Text("备份与恢复", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.settings_backup), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedButton(
                 onClick = { exportLauncher.launch("ssh2proxy-backup.json") },
                 modifier = Modifier.weight(1f)
-            ) { Text("导出配置") }
+            ) { Text(stringResource(R.string.settings_export)) }
             OutlinedButton(
                 onClick = { importLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
                 modifier = Modifier.weight(1f)
-            ) { Text("导入配置") }
+            ) { Text(stringResource(R.string.settings_import)) }
         }
         if (backupMsg.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
@@ -728,11 +772,11 @@ fun SettingsTab(onImported: () -> Unit) {
             ProfileStore.save(ctx, emptyList())
             cleared = true
         }) {
-            Text("清除所有配置")
+            Text(stringResource(R.string.settings_clear_all))
         }
         if (cleared) {
             Spacer(Modifier.height(8.dp))
-            Text("已清除，请回到主页重新添加")
+            Text(stringResource(R.string.settings_cleared))
         }
     }
 }
@@ -756,10 +800,10 @@ fun ProfileCard(profile: Profile, selected: Boolean, onClick: () -> Unit, onEdit
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
-                Text("DNS: ${profile.dnsServer}", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.profile_dns_label, profile.dnsServer), style = MaterialTheme.typography.bodySmall)
             }
-            TextButton(onClick = onEdit) { Text("编辑") }
-            TextButton(onClick = onDelete) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            TextButton(onClick = onEdit) { Text(stringResource(R.string.edit)) }
+            TextButton(onClick = onDelete) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
         }
     }
 }
@@ -775,27 +819,27 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "添加 SSH 配置" else "编辑 SSH 配置") },
+        title = { Text(if (existing == null) stringResource(R.string.profile_add_title) else stringResource(R.string.profile_edit_title)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text("主机地址") }, singleLine = true)
+                OutlinedTextField(value = host, onValueChange = { host = it }, label = { Text(stringResource(R.string.profile_host)) }, singleLine = true)
                 OutlinedTextField(
-                    value = port, onValueChange = { port = it }, label = { Text("端口") },
+                    value = port, onValueChange = { port = it }, label = { Text(stringResource(R.string.profile_port)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
-                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("用户名") }, singleLine = true)
+                OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text(stringResource(R.string.profile_username)) }, singleLine = true)
                 OutlinedTextField(
-                    value = password, onValueChange = { password = it }, label = { Text("密码") },
+                    value = password, onValueChange = { password = it }, label = { Text(stringResource(R.string.profile_password)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation()
                 )
                 OutlinedTextField(
-                    value = dnsServer, onValueChange = { dnsServer = it }, label = { Text("DNS 服务器（国内建议 223.5.5.5）") },
+                    value = dnsServer, onValueChange = { dnsServer = it }, label = { Text(stringResource(R.string.profile_dns)) },
                     singleLine = true
                 )
                 OutlinedTextField(
-                    value = note, onValueChange = { note = it }, label = { Text("备注（留空则显示地址）") },
+                    value = note, onValueChange = { note = it }, label = { Text(stringResource(R.string.profile_note)) },
                     singleLine = true
                 )
             }
@@ -812,8 +856,8 @@ fun ProfileFormDialog(existing: Profile?, onSave: (Profile) -> Unit, onDismiss: 
                     note = note.trim(),
                 )
                 onSave(p)
-            }) { Text("保存") }
+            }) { Text(stringResource(R.string.save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } }
     )
 }

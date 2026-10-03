@@ -3,7 +3,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application
-        android:label="SSH2Proxy"
+        android:label="@string/app_name"
         android:theme="@style/Theme.Ssh2Proxy">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>

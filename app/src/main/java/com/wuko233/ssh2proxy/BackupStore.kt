@@ -31,6 +31,7 @@ object BackupStore {
             .put("http_port", SettingsStore.httpPort(ctx))
             .put("test_domain", SettingsStore.testDomain(ctx))
             .put("test_target", SettingsStore.testTarget(ctx))
+            .put("language", SettingsStore.language(ctx))
         root.put("settings", settings)
         return root.toString(2)
     }
@@ -64,6 +65,7 @@ object BackupStore {
                 SettingsStore.setHttpPort(ctx, settings.optInt("http_port", 8888))
                 SettingsStore.setTestDomain(ctx, settings.optString("test_domain", "www.baidu.com"))
                 SettingsStore.setTestTarget(ctx, settings.optString("test_target", "223.5.5.5:53"))
+                SettingsStore.setLanguage(ctx, settings.optString("language", LocaleHelper.SYSTEM))
             }
             true
         } catch (_: Exception) {
