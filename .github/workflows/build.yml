@@ -54,11 +54,24 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK packages and NDK
-        run: sdkmanager --install "platforms;android-37.0" "build-tools;36.0.0" "ndk;$NDK_VERSION"
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+
+          BOOTSTRAP_SM="$(find "$SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort -V | tail -n1)"
+          [ -n "$BOOTSTRAP_SM" ] || { echo "sdkmanager not found under $SDK_ROOT"; exit 1; }
+          echo "Bootstrap sdkmanager: $BOOTSTRAP_SM"
+          yes | "$BOOTSTRAP_SM" --licenses >/dev/null 2>&1 || true
+          "$BOOTSTRAP_SM" --install "cmdline-tools;latest" >/dev/null 2>&1 || true
+
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$BOOTSTRAP_SM"
+          echo "Using sdkmanager: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-37.0" "build-tools;36.0.0" "build-tools;37.0.0" "ndk;$NDK_VERSION"
+          echo "ANDROID_NDK_HOME=$SDK_ROOT/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: Set up Rust with Android target
         uses: dtolnay/rust-toolchain@stable
