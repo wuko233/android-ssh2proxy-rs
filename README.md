@@ -132,7 +132,6 @@ is disabled and TCP/DNS keep working.
 | `app/src/main/java/com/wuko233/ssh2proxy/` | Kotlin UI (`MainActivity.kt`), VPN service, stores, JNI bridge, locale helper. |
 | `app/src/main/res/values*/strings.xml` | English (default) and Chinese UI strings. |
 | `server/udprelay.py` | Server-side UDP-over-SSH-channel relay (base64-embedded in the client). |
-| `docs/` | Design documents and implementation plans. |
 | `.github/workflows/build.yml` | CI: Rust tests/clippy + Android APK build. |
 
 ## Notes and limitations

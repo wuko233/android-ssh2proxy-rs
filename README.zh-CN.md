@@ -118,7 +118,6 @@ UDP 转发会在 SSH 服务器上运行一段 Python 3 脚本，由客户端通�
 | `app/src/main/java/com/wuko233/ssh2proxy/` | Kotlin UI（`MainActivity.kt`）、VPN 服务、存储、JNI 桥、语言辅助。 |
 | `app/src/main/res/values*/strings.xml` | 英文（默认）与中文界面字符串。 |
 | `server/udprelay.py` | 服务器端 UDP-over-SSH 中继脚本（以 base64 内嵌到客户端）。 |
-| `docs/` | 设计文档与实施计划。 |
 | `.github/workflows/build.yml` | CI：Rust 测试/clippy + Android APK 构建。 |
 
 ## 说明与限制
